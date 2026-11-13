@@ -1,0 +1,8 @@
+Coloque aqui os logos das plataformas, em PNG quadrado (de preferência 256x256),
+com o nome igual ao "slug" da tabela plataformas:
+
+netflix.png  prime.png  disney.png  max.png  paramount.png  appletv.png
+crunchyroll.png  looke.png  globoplay.png  telecine.png  plutotv.png
+sky.png  runtime.png  discovery.png  mubi.png  dgo.png
+
+Se o arquivo não existir, o site mostra o nome em cima da cor da marca.

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="58" height="52" viewBox="-1 -10 58 52" fill="none">
+  <!-- Claquete do Figma (Hi-Fi Início > Group 15). Animação do Figma: a tampa gira de -25° até 0°
+       no 1º segundo, fica parada no 2º e repete (2s, linear). O viewBox sobe 10px pra tampa não ser cortada. -->
+  <style>
+    .tampa {
+      transform-box: fill-box;
+      transform-origin: 50% 50%;
+      animation: claquete 2s linear infinite;
+    }
+    @keyframes claquete {
+      0%   { transform: rotate(-25deg); }
+      50%  { transform: rotate(0deg); }
+      100% { transform: rotate(0deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .tampa { animation: none; }
+    }
+  </style>
+
+  <!-- Tampa (parte que abre e fecha) -->
+  <g class="tampa">
+    <rect x="0.487883" y="0.499853" width="45.5632" height="5.46806" transform="matrix(1 0 -0.0242333 0.999706 6.78457 2.00149)" fill="#F2F2F5" stroke="#201A1B"/>
+    <path d="M52.5225 2.50281L52.5225 7.55191L52.5225 8.01092L51.1838 8.01091L48.9944 8.01092L52.5225 2.50281Z" fill="url(#p0)"/>
+    <path d="M10.2241 2.50274L14.3007 2.50274L11.9935 6.17481L10.9931 8.01085L7.14778 8.01085L10.2241 2.50274Z" fill="url(#p1)"/>
+    <path d="M35.7602 2.50115L39.8369 2.50115L37.5296 6.17323L36.5293 8.00926L32.6839 8.00927L35.7602 2.50115Z" fill="url(#p2)"/>
+    <path d="M44.2202 2.50115L48.2968 2.50115L45.9896 6.17323L44.9892 8.00926L41.1439 8.00927L44.2202 2.50115Z" fill="url(#p3)"/>
+    <path d="M27.3002 2.50115L31.3769 2.50115L29.0697 6.17323L28.0693 8.00926L24.224 8.00927L27.3002 2.50115Z" fill="url(#p4)"/>
+    <path d="M18.8413 2.50115L22.9179 2.50115L20.6107 6.17323L19.6103 8.00926L15.765 8.00927L18.8413 2.50115Z" fill="url(#p5)"/>
+  </g>
+
+  <!-- Corpo -->
+  <path d="M4.66602 12.6792H51.3327V31.9999C51.3327 37.5228 46.8555 42 41.3327 42H14.666C9.14318 42 4.66602 37.5228 4.66602 32V12.6792Z" fill="url(#p6)"/>
+  <line x1="9.33301" y1="21.6887" x2="45.8886" y2="21.6887" stroke="#F2F2F5"/>
+  <line x1="9.33301" y1="35.9529" x2="45.8886" y2="35.9529" stroke="#F2F2F5"/>
+  <line x1="9.33301" y1="28.8208" x2="45.8886" y2="28.8208" stroke="#F2F2F5"/>
+
+  <!-- Faixa fixa listrada -->
+  <path d="M50.833 9.08484V14.6884H5.16602V9.08484H50.833Z" fill="#F2F2F5" stroke="#201A1B"/>
+  <path d="M50.957 8.92249L50.957 14.4106L50.957 14.9096L49.6141 14.9096L47.4177 14.9096L50.957 8.92249Z" fill="url(#p7)"/>
+  <path d="M8.52262 8.9224L12.6123 8.9224L10.2977 12.9138L9.29414 14.9095L5.43651 14.9095L8.52262 8.9224Z" fill="url(#p8)"/>
+  <path d="M34.1398 8.92069L38.2295 8.92069L35.9149 12.9121L34.9113 14.9078L31.0537 14.9078L34.1398 8.92069Z" fill="url(#p9)"/>
+  <path d="M42.6271 8.92069L46.7168 8.92069L44.4022 12.9121L43.3986 14.9078L39.541 14.9078L42.6271 8.92069Z" fill="url(#p10)"/>
+  <path d="M25.6535 8.92069L29.7432 8.92069L27.4286 12.9121L26.425 14.9078L22.5674 14.9078L25.6535 8.92069Z" fill="url(#p11)"/>
+  <path d="M17.1672 8.92069L21.2568 8.92069L18.9422 12.9121L17.9387 14.9078L14.081 14.9078L17.1672 8.92069Z" fill="url(#p12)"/>
+  <line x1="18.3887" y1="22.1887" x2="18.3887" y2="29.3208" stroke="#F2F2F5"/>
+  <line x1="36.2773" y1="22.1887" x2="36.2773" y2="29.3208" stroke="#F2F2F5"/>
+
+  <!-- Dobradiça -->
+  <path d="M13.5925 7.41696C14.5625 7.99724 14.5663 9.40148 13.5995 9.98727L6.98051 13.9963C5.98241 14.6008 4.70676 13.8844 4.70358 12.7175L4.68182 4.7371C4.67864 3.57022 5.95035 2.84659 6.95174 3.44551L13.5925 7.41696Z" fill="#D9D9D9" stroke="#201A1B"/>
+  <ellipse cx="6.611" cy="5.94344" rx="1.16667" ry="1.18868" fill="#201A1B"/>
+  <ellipse cx="6.611" cy="11.4906" rx="1.16667" ry="1.18868" fill="#201A1B"/>
+  <ellipse cx="11.277" cy="9.11324" rx="1.16667" ry="1.18868" fill="#201A1B"/>
+
+  <defs>
+    <linearGradient id="p0" x1="50.4825" y1="5.18201" x2="53.1373" y2="7.20345" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p1" x1="8.57164" y1="4.67295" x2="11.7133" y2="7.06506" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p2" x1="34.1078" y1="4.67136" x2="37.2494" y2="7.06347" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p3" x1="42.5677" y1="4.67136" x2="45.7094" y2="7.06347" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p4" x1="25.6478" y1="4.67136" x2="28.7895" y2="7.06347" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p5" x1="17.1888" y1="4.67136" x2="20.3305" y2="7.06347" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p6" x1="27.9993" y1="12.6792" x2="27.9993" y2="42" gradientUnits="userSpaceOnUse"><stop/><stop offset="1" stop-color="#666666"/></linearGradient>
+    <linearGradient id="p7" x1="48.9105" y1="11.8347" x2="51.727" y2="13.8139" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p8" x1="6.86492" y1="11.2813" x2="10.1979" y2="13.6235" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p9" x1="32.4821" y1="11.2796" x2="35.815" y2="13.6218" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p10" x1="40.9694" y1="11.2796" x2="44.3023" y2="13.6218" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p11" x1="23.9958" y1="11.2796" x2="27.3287" y2="13.6218" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+    <linearGradient id="p12" x1="15.5094" y1="11.2796" x2="18.8424" y2="13.6218" gradientUnits="userSpaceOnUse"><stop stop-color="#FF383C"/><stop offset="0.649038" stop-color="#992224"/></linearGradient>
+  </defs>
+</svg>

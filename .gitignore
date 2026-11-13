@@ -1,0 +1,13 @@
+target/
+.idea/
+*.iml
+.env
+.DS_Store
+segredos.properties
+segredos/
+!segredos/
+segredos/*
+!segredos/segredos.properties.example
+backend/src/main/java/br/com/letterroyale/oracleJdk-*/
+chave google/
+client_secret_*.json

@@ -1,0 +1,14 @@
+# Copie este arquivo para segredos.properties e preencha os valores locais.
+# Nunca coloque credenciais reais neste arquivo de exemplo.
+DB_PASSWORD=
+TMDB_TOKEN=
+JWT_SECRET=
+DB_USER=root
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=letterroyale
+TUYA_CLIENT_ID=
+TUYA_SECRET=
+TUYA_DEVICE_ID=
+# Entrar com Google (opcional): o Client ID do Google Cloud
+GOOGLE_CLIENT_ID=
