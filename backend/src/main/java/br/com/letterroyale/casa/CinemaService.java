@@ -1,5 +1,9 @@
 package br.com.letterroyale.casa;
 
+import br.com.letterroyale.casa.atmosfera.Atmosfera;
+import br.com.letterroyale.casa.atmosfera.AtmosferaPorGenero;
+import br.com.letterroyale.casa.atmosfera.EfeitoLuz;
+import br.com.letterroyale.casa.eventos.EventoCasa;
 import br.com.letterroyale.erro.ApiException;
 import br.com.letterroyale.notificacao.NotificacaoService;
 import br.com.letterroyale.tmdb.TmdbService;
@@ -11,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +33,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *                 (luz sobe aos poucos) + o site pergunta "O que achou?".
  *
  *  O BRILHO vem do slider de Iluminação (mexer nele NÃO desliga o modo).
+ *  [+] ATMOSFERA: no modo ASSISTINDO, os gêneros do filme decidem como a
+ *      sala inteira se comporta (terror = luz baixa pulsando, ação = clarões,
+ *      romance = luz quente...). Ver casa/atmosfera/AtmosferaPorGenero.java.
  *  O estado fica na tabela cinema_ativo -> se o servidor reiniciar, continua.
  * =====================================================================
  */
@@ -45,6 +53,10 @@ public class CinemaService {
 
     // Quando cada usuário troca de cor de novo (em memória; não precisa ir pro banco)
     private final Map<Long, Long> proximaTroca = new ConcurrentHashMap<>();
+    // Atmosfera do filme que cada usuário está ASSISTINDO (em memória; se o servidor reiniciar, é recalculada)
+    private final Map<Long, Atmosfera> atmosferas = new ConcurrentHashMap<>();
+    // [+] Intervalo: desde quando o filme está pausado (o fim do filme é empurrado pra frente ao voltar)
+    private final Map<Long, Long> pausadoDesde = new ConcurrentHashMap<>();
 
     public CinemaService(Db db, TmdbService tmdb, PaletaService paletas, TuyaService tuya, CasaService casa,
                          NotificacaoService notificacoes) {
@@ -105,6 +117,11 @@ public class CinemaService {
         }
         int minutos = (duracao == null || duracao <= 0) ? (serie ? 45 : 120) : duracao;
 
+        // [+] ATMOSFERA: assistindo um filme -> os gêneros decidem brilho, ritmo, efeito, cortinas, ar e volume
+        Atmosfera atmosfera = (assistindo && tmdbId != null) ? atmosferaDoFilme(tmdbId) : null;
+        if (atmosfera != null) ritmo = atmosfera.ritmo();
+        int brilhoInicial = atmosfera != null ? atmosfera.brilho() : BRILHO_INICIAL;
+
         db.executar("""
                 REPLACE INTO cinema_ativo (usuario_id, tmdb_id, modo, ritmo_seg, indice_cor, iniciado_em, termina_em, terminou,
                                            temporada, episodio, titulo_ep)
@@ -114,7 +131,24 @@ public class CinemaService {
 
         // Card "Modo Cinema" aparece como ativo + luz em 30%
         db.executar("UPDATE cenas SET ativa = (nome = 'Modo Cinema') WHERE usuario_id = ?", uid);
-        db.executar("UPDATE dispositivos SET ligado = TRUE, valor = ? WHERE usuario_id = ? AND tipo = 'iluminacao'", BRILHO_INICIAL, uid);
+        db.executar("UPDATE dispositivos SET ligado = TRUE, valor = ? WHERE usuario_id = ? AND tipo = 'iluminacao'", brilhoInicial, uid);
+
+        String titulo = tmdbId == null ? null : db.um("SELECT titulo FROM filmes_cache WHERE tmdb_id = ?", tmdbId)
+                .map(f -> (String) f.get("titulo")).orElse(null);
+        if (atmosfera != null) {
+            atmosferas.put(uid, atmosfera);
+            casa.publicar(uid, EventoCasa.Tipo.SESSAO_INICIADA, "Sessão começou: " + titulo + (tituloEp != null ? " · " + tituloEp : ""));
+            try {
+                casa.aplicarAmbiente(uid, atmosfera);   // cortinas, ar e volume entram no clima do filme
+            } catch (Exception e) {
+                log.warn("Atmosfera aplicada só em parte: {}", e.getMessage());
+            }
+        } else {
+            atmosferas.remove(uid);
+            casa.publicar(uid, EventoCasa.Tipo.SESSAO_INICIADA, titulo == null
+                    ? "Modo Cinema ligado: a luz acompanha o filme que você abrir"
+                    : "Modo Cinema acompanhando " + titulo);
+        }
 
         if (tmdbId == null) {
             // Ainda sem filme: luz quente e fraca até a pessoa abrir algum
@@ -156,6 +190,8 @@ public class CinemaService {
         db.executar("DELETE FROM cinema_ativo WHERE usuario_id = ?", uid);
         db.executar("UPDATE cenas SET ativa = FALSE WHERE usuario_id = ? AND nome = 'Modo Cinema'", uid);
         proximaTroca.remove(uid);
+        pausadoDesde.remove(uid);
+        if (atmosferas.remove(uid) != null) casa.publicar(uid, EventoCasa.Tipo.CINEMA_DESLIGADO, "Modo Cinema desligado");
     }
 
     /** Fim do filme (pelo relógio ou pelo botão "Encerrar filme agora" da apresentação). */
@@ -164,6 +200,9 @@ public class CinemaService {
         if (c == null) return;
         db.executar("UPDATE cinema_ativo SET terminou = TRUE WHERE usuario_id = ?", uid);
         proximaTroca.remove(uid);
+        atmosferas.remove(uid);
+        pausadoDesde.remove(uid);
+        casa.publicar(uid, EventoCasa.Tipo.CREDITOS, "Fim do filme: créditos subindo, luz voltando aos poucos");
 
         boolean serie = c.get("tmdb_id") != null && TmdbService.ehSerie(((Number) c.get("tmdb_id")).longValue());
         if (serie && "assistindo".equals(c.get("modo"))) {
@@ -214,7 +253,89 @@ public class CinemaService {
                 "filme", c.get("tmdb_id") == null ? null : comEpisodio(TmdbService.doCache(c), c),
                 "paleta", paleta,
                 "cor_atual", corAtual,
+                "atmosfera", Json.verdade(c.get("terminou")) ? null : paraMapa(atmosferaAtiva(uid, c)),
+                "pausado", pausadoDesde.containsKey(uid),
                 "proximo_fila", proximoDaFila(uid));
+    }
+
+    // ================= INTERVALO (pausa de verdade, sem perder o filme) =================
+
+    /** Pausa: as cores param, a luz sobe pra 60% neutra e o relógio do filme congela. */
+    public void pausar(long uid) {
+        Map<String, Object> c = db.um("SELECT * FROM cinema_ativo WHERE usuario_id = ? AND terminou = FALSE", uid)
+                .orElseThrow(() -> new ApiException(400, "Nenhum filme passando agora."));
+        if (pausadoDesde.putIfAbsent(uid, System.currentTimeMillis()) != null) return;   // já estava pausado
+        try {
+            tuya.luzBranca(casa.lampadaDo(uid), 60, 50);
+        } catch (TuyaService.LampadaException e) {
+            log.warn(e.getMessage());
+        }
+        String titulo = c.get("tmdb_id") == null ? "o filme" : db.um("SELECT titulo FROM filmes_cache WHERE tmdb_id = ?", c.get("tmdb_id"))
+                .map(f -> (String) f.get("titulo")).orElse("o filme");
+        casa.publicar(uid, EventoCasa.Tipo.INTERVALO, "Intervalo: " + titulo + " pausado, luz em 60%");
+    }
+
+    /** Volta do intervalo: empurra o fim do filme pelo tempo parado e as cores voltam. */
+    public void retomar(long uid) {
+        Long desde = pausadoDesde.remove(uid);
+        if (desde == null) return;
+        long segundos = Math.max(0, (System.currentTimeMillis() - desde) / 1000);
+        db.executar("UPDATE cinema_ativo SET termina_em = DATE_ADD(termina_em, INTERVAL ? SECOND) WHERE usuario_id = ? AND termina_em IS NOT NULL",
+                segundos, uid);
+        proximaTroca.put(uid, 0L);
+        casa.publicar(uid, EventoCasa.Tipo.RETOMADA, "Filme continuando (ficou " + (segundos / 60) + " min em pausa)");
+    }
+
+    /**
+     * Atmosfera escolhida na mão ("LetterRoyale, modo terror"): vale na hora,
+     * com ou sem filme passando. Com filme: as cores do pôster seguem, mas no clima novo.
+     */
+    public String forcarAtmosfera(long uid, String chave) {
+        Atmosfera a = AtmosferaPorGenero.porChave(chave)
+                .orElseThrow(() -> new ApiException(404, "Atmosfera não encontrada: " + chave));
+        atmosferas.put(uid, a);
+        boolean temFilme = ativo(uid);
+        if (temFilme) {
+            pausadoDesde.remove(uid);
+            mudarRitmo(uid, a.ritmo());
+            proximaTroca.put(uid, 0L);
+        }
+        String aviso = casa.aplicarAmbiente(uid, a);   // brilho, cortinas, ar, volume + eventos
+        if (!temFilme) {
+            try {
+                tuya.luzBranca(casa.lampadaDo(uid), a.brilho(), 10);
+            } catch (TuyaService.LampadaException e) {
+                log.warn(e.getMessage());
+            }
+        }
+        return aviso;
+    }
+
+    // ================= ATMOSFERA (gêneros do filme -> clima da sala) =================
+
+    /** Lê os gêneros do filme/série no TMDB (resposta já fica em cache) e escolhe a atmosfera. */
+    Atmosfera atmosferaDoFilme(long tmdbId) {
+        try {
+            JsonNode detalhes = tmdb.tmdb(TmdbService.ehSerie(tmdbId) ? "/tv/" + (-tmdbId) : "/movie/" + tmdbId);
+            List<Integer> generos = new ArrayList<>();
+            detalhes.path("genres").forEach(g -> generos.add(g.path("id").asInt()));
+            return AtmosferaPorGenero.escolher(generos);
+        } catch (Exception e) {
+            log.warn("Sem gêneros do filme {} ({}): usando atmosfera padrão", tmdbId, e.getMessage());
+            return AtmosferaPorGenero.PADRAO;
+        }
+    }
+
+    private static Map<String, Object> paraMapa(Atmosfera a) {
+        return a == null ? null : a.paraMapa();
+    }
+
+    /** Atmosfera em uso (null no modo navegando). Recalcula se o servidor reiniciou no meio do filme. */
+    private Atmosfera atmosferaAtiva(long uid, Map<String, Object> c) {
+        Atmosfera escolhida = atmosferas.get(uid);   // escolhida na mão (voz/tela) vale em qualquer modo
+        if (escolhida != null) return escolhida;
+        if (!"assistindo".equals(c.get("modo")) || c.get("tmdb_id") == null) return null;
+        return atmosferas.computeIfAbsent(uid, k -> atmosferaDoFilme(((Number) c.get("tmdb_id")).longValue()));
     }
 
     /** Junta temporada/episódio no item (série). Filme fica igual. */
@@ -342,6 +463,7 @@ public class CinemaService {
         for (Map<String, Object> c : ativos) {
             long uid = ((Number) c.get("usuario_id")).longValue();
             try {
+                if (pausadoDesde.containsKey(uid)) continue;   // intervalo: nem troca cor nem acaba o filme
                 if (Json.verdade(c.get("acabou"))) {
                     terminarFilme(uid);
                     continue;
@@ -356,7 +478,9 @@ public class CinemaService {
 
                 db.executar("UPDATE cinema_ativo SET indice_cor = ? WHERE usuario_id = ?", idx + 1, uid);
                 proximaTroca.put(uid, agora + ((Number) c.get("ritmo_seg")).intValue() * 1000L);
-                tuya.cor(casa.lampadaDo(uid), cor, Math.max(5, brilho));
+                Atmosfera atm = atmosferaAtiva(uid, c);   // terror pulsa, ação dá clarões...
+                int brilhoAgora = atm == null ? Math.max(5, brilho) : EfeitoLuz.brilho(atm.efeito(), brilho, idx);
+                tuya.cor(casa.lampadaDo(uid), cor, brilhoAgora);
             } catch (TuyaService.LampadaException e) {
                 log.warn("Modo Cinema: {}", e.getMessage());
                 proximaTroca.put(uid, agora + 10_000);   // lâmpada fora? tenta de novo em 10s

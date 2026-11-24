@@ -113,6 +113,28 @@ public class NotificacaoService {
         }
     }
 
+    /** Alguém curtiu a conversa "conversaId". Junta numa notificação só enquanto não for lida (igual à review). */
+    public void curtidaConversa(long quemCurtiu, long conversaId) {
+        Map<String, Object> c = db.um("SELECT usuario_id, texto FROM conversas WHERE id = ?", conversaId).orElse(null);
+        if (c == null) return;
+        long dono = ((Number) c.get("usuario_id")).longValue();
+        if (dono == quemCurtiu) return;
+        String trecho = (String) c.get("texto");
+        if (trecho.length() > 40) trecho = trecho.substring(0, 37) + "...";
+        long outros = db.numero("SELECT COUNT(*) FROM conversa_curtidas WHERE conversa_id = ? AND usuario_id <> ?", conversaId, quemCurtiu);
+        String texto = arroba(quemCurtiu) + (outros > 0 ? " e mais " + outros + (outros == 1 ? " pessoa curtiram" : " pessoas curtiram") : " curtiu")
+                + " sua conversa: \"" + trecho + "\"";
+        String chave = "curtida-conversa:" + conversaId;
+        int mudou = db.executar("""
+                UPDATE notificacoes SET texto = ?, ator_id = ?, criado_em = NOW()
+                 WHERE usuario_id = ? AND tipo = 'curtida' AND chave = ? AND lida = FALSE
+                """, texto, quemCurtiu, dono, chave);
+        if (mudou == 0) {
+            db.executar("UPDATE notificacoes SET chave = NULL WHERE usuario_id = ? AND chave = ?", dono, chave);
+            criar(dono, "curtida", texto, "#/reviews?filtro=conversas&c=" + conversaId, quemCurtiu, null, chave);
+        }
+    }
+
     /** Alguém salvou a lista "listaId". */
     public void listaSalva(long quemSalvou, long listaId) {
         db.um("SELECT usuario_id, nome FROM listas WHERE id = ?", listaId).ifPresent(l ->

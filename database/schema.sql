@@ -162,7 +162,8 @@ CREATE TABLE IF NOT EXISTS plataformas (
 
 -- Inserção de plataformas base (ids 1-4 da equipe mantidos; 5+ = tela Conexões do Figma)
 -- obs: o HBO Max hoje se chama "Max" no TMDB (provider 1899); o 384 é o id antigo
-INSERT INTO plataformas (id, nome, slug, cor, tmdb_provider_id) VALUES
+-- INSERT IGNORE: rodar o schema de novo não dá erro de "Duplicate entry"
+INSERT IGNORE INTO plataformas (id, nome, slug, cor, tmdb_provider_id) VALUES
 (1, 'Netflix', 'netflix', '#E50914', 8),
 (2, 'Amazon Prime Video', 'prime', '#1A98FF', 119),
 (3, 'Disney+', 'disney', '#0E2A8C', 337),
@@ -289,4 +290,49 @@ CREATE TABLE IF NOT EXISTS notificacoes (
     INDEX idx_notif_usuario (usuario_id, lida, criado_em),
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     FOREIGN KEY (ator_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+-- [+] CONVERSAS (posts estilo Twitter na tela Reviews: "me indiquem um filme...")
+--     O servidor também cria estas tabelas sozinho ao subir (ConversasController).
+CREATE TABLE IF NOT EXISTS conversas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    texto VARCHAR(500) NOT NULL,
+    tmdb_id INT NULL,                          -- filme marcado no post (opcional)
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_conversas_data (criado_em),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS conversa_respostas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    conversa_id INT NOT NULL,
+    usuario_id INT NOT NULL,
+    texto VARCHAR(500) NOT NULL,
+    tmdb_id INT NULL,                          -- filme indicado na resposta (opcional)
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_respostas_conversa (conversa_id),
+    FOREIGN KEY (conversa_id) REFERENCES conversas(id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS conversa_curtidas (
+    conversa_id INT NOT NULL,
+    usuario_id INT NOT NULL,
+    PRIMARY KEY (conversa_id, usuario_id),
+    FOREIGN KEY (conversa_id) REFERENCES conversas(id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+-- [+] Respostas nas REVIEWS (igual às Conversas; o servidor também cria sozinho ao subir)
+CREATE TABLE IF NOT EXISTS review_respostas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    review_id INT NOT NULL,
+    usuario_id INT NOT NULL,
+    texto VARCHAR(500) NOT NULL,
+    tmdb_id INT NULL,                          -- filme indicado na resposta (opcional)
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_review_respostas (review_id),
+    FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );

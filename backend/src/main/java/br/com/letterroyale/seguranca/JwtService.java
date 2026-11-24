@@ -33,6 +33,18 @@ public class JwtService {
                 .compact();
     }
 
+    /** [+] Token CURTO (ex.: 12 h) pro QR code do celular-controle: se vazar, vence logo. */
+    public String gerar(long usuarioId, String username, Duration validade) {
+        return Jwts.builder()
+                .subject(String.valueOf(usuarioId))
+                .claim("username", username)
+                .claim("escopo", "controle")
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + validade.toMillis()))
+                .signWith(chave)
+                .compact();
+    }
+
     /** Devolve os dados do token ou null se for inválido/vencido. */
     public UsuarioLogado validar(String token) {
         try {

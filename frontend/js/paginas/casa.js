@@ -34,7 +34,7 @@ Paginas.casa = {
     const nomeCurto = (n) => n.match(/\(((?:[^()]|\([^()]*\))+)\)$/)?.[1] || n;
     const celularTocando = c.som?.celulares_tocando?.[0];
     const saidaSom = c.som?.modo === 'real' && c.som.nome
-      ? `${celularTocando ? `📱 ${celularTocando} → ` : c.som.bluetooth ? '🎧 ' : ''}${nomeCurto(c.som.nome)} · ` : '';
+      ? `${celularTocando ? `${celularTocando} → ` : ''}${nomeCurto(c.som.nome)} · ` : '';
     const sub = (d) => ({ iluminacao: `${d.valor}%`, cortinas: d.estado, temperatura: `${d.valor}°C`, tv_som: `${saidaSom}Volume ${d.valor}%` }[d.tipo]);
 
     raiz.innerHTML = `
@@ -54,24 +54,27 @@ Paginas.casa = {
                   <div class="segmentado" role="group" aria-label="Ritmo das cores">
                     ${Object.entries(RITMOS).map(([k, v]) => `<button data-ritmo="${k}" class="${cin.ritmo === k ? 'ativo' : ''}">${v}</button>`).join('')}
                   </div>
+                  ${cin.modo === 'assistindo' ? `<button class="btn ${cin.pausado ? 'btn-primario' : ''}" id="intervalo" title="Pausa de verdade: o filme continua de onde parou">${cin.pausado ? `${icone('play')} Voltar ao filme` : `${icone('pausa')} Intervalo`}</button>` : ''}
                   ${cin.modo === 'assistindo' ? `<button class="btn" id="encerrar" title="Para a apresentação: simula o fim">${cin.filme?.episodio ? 'Encerrar episódio agora' : 'Encerrar filme agora'}</button>` : ''}
                 </div>` : ''}
             </div>
             ${ativa ? '<button class="btn" id="desativar">Desativar</button>' : ''}
           </section>
 
+          ${SalaAoVivo.html()}
+
           <section class="secao">
             <div class="secao-topo">
               <h2>Dispositivos</h2>
               <span style="display:flex;gap:10px;align-items:center">
-                <span class="badge" title="Real = lâmpada de verdade. Simulação = só no banco.">💡 ${c.lampada?.modo === 'real' ? 'Lâmpada real' : 'Simulação'}</span>
+                <span class="badge" title="Real = lâmpada de verdade. Simulação = só no banco.">${icone('lampada', 'width="14"')} ${c.lampada?.modo === 'real' ? 'Lâmpada real' : 'Simulação'}</span>
                 <button class="link" id="gerenciar">Gerenciar</button>
               </span>
             </div>
             ${c.dispositivos.map((d) => `
               <div class="dispositivo ${d.ligado ? '' : 'desligado'}" data-disp="${d.id}">
                 <span class="ico" style="width:38px;height:38px;border-radius:8px;background:var(--surface-raised);display:grid;place-items:center">${icone(ICONE_DISP[d.tipo], 'width="20"')}</span>
-                <div><b>${esc(d.nome)}</b><div class="meta" id="sub-${d.id}">${esc(sub(d))}</div></div>
+                <div><b>${esc(d.nome)}</b>${['cortinas', 'temperatura'].includes(d.tipo) ? ` <span class="badge disp-modo" title="${d.tuya_device_id ? 'Aparelho de verdade (Tuya)' : 'Só no sistema: cadastre em Gerenciar'}">${d.tuya_device_id ? 'Conectado' : 'Simulado'}</span>` : ''}<div class="meta" id="sub-${d.id}">${esc(sub(d))}</div></div>
                 ${controle(d)}
                 <label class="switch"><input type="checkbox" data-ligar="${d.id}" ${d.ligado ? 'checked' : ''} aria-label="Ligar ${esc(d.nome)}"><span></span></label>
               </div>`).join('')}
@@ -81,7 +84,7 @@ Paginas.casa = {
         <aside class="lateral">
           <section class="card">
             <h2 style="font-size:22px;margin-bottom:14px">Cenas rápidas</h2>
-            ${c.cenas.map((x) => `
+            ${c.cenas.filter((x) => x.nome !== 'Pausa').map((x) => `
               <button class="item ${x.ativa ? 'ativo' : ''}" data-cena="${x.id}">
                 <span class="ico">${icone(ICONE_CENA[x.nome] || 'casa')}</span>
                 <span class="txt">${esc(x.nome)}<small>${esc(x.descricao || '')}</small></span>
@@ -106,6 +109,8 @@ Paginas.casa = {
       </div>`;
 
     const recarregar = () => Paginas.casa.render(raiz);
+    // Sala ao vivo (gêmeo digital) + comando de voz: ver sala.js
+    const sala = SalaAoVivo.montar(raiz, { dispositivos: c.dispositivos, cinema: cin }, { cenas: c.cenas, dispositivos: c.dispositivos, fila: c.fila || [], recarregar });
     // Se a lâmpada não responder, o back salva mesmo assim e manda um "aviso"
     const avisar = (r) => r && r.aviso && toast(r.aviso);
     const salvar = async (id, dados) => { try { avisar(await API.dispositivo(id, dados)); } catch (e) { toast(e.message); } };
@@ -131,6 +136,11 @@ Paginas.casa = {
       escolherSegmento(b);
       try { await API.cinemaRitmo(b.dataset.ritmo); } catch (e) { toast(e.message); if (antes) escolherSegmento(antes); }
     }));
+    const intervalo = $('#intervalo');
+    if (intervalo) intervalo.onclick = async () => {
+      try { await (cin.pausado ? API.cinemaRetomar() : API.cinemaPausar()); toast(cin.pausado ? 'Voltando ao filme' : 'Intervalo: o filme espera você'); } catch (e) { toast(e.message); }
+      recarregar();
+    };
     const enc = $('#encerrar');
     if (enc) enc.onclick = async () => { try { await API.cinemaTerminar(); verificarFimDeFilme(); recarregar(); } catch (e) { toast(e.message); } };
 
@@ -145,6 +155,7 @@ Paginas.casa = {
           if (ico && est.cor_atual) { ico.style.background = est.cor_atual; ico.style.color = '#fff'; ico.style.boxShadow = `0 0 28px ${est.cor_atual}`; }
           const pal = $('#paleta-cinema');
           if (pal) pal.innerHTML = paletaHtml(est.paleta, est.cor_atual);
+          sala.atualizarCinema(est);
         } catch { /* sem conexão: tenta de novo */ }
       }, 1000);
     }
@@ -158,12 +169,13 @@ Paginas.casa = {
       $$('.controle, .controle button', linha).forEach((el) => { el.disabled = !ligado; });
     };
     c.dispositivos.forEach((d) => travar(d.id, d.ligado));
-    $$('[data-ligar]', raiz).forEach((i) => (i.onchange = () => { travar(i.dataset.ligar, i.checked); salvar(i.dataset.ligar, { ligado: i.checked }); }));
+    $$('[data-ligar]', raiz).forEach((i) => (i.onchange = () => { travar(i.dataset.ligar, i.checked); sala.atualizarDispositivo(i.dataset.ligar, { ligado: i.checked }); salvar(i.dataset.ligar, { ligado: i.checked }); }));
     $$('[data-estado]', raiz).forEach((b) => (b.onclick = async () => {
       if (b.classList.contains('ativo')) return;
       escolherSegmento(b);
       const subt = $(`#sub-${b.dataset.id}`);
       if (subt) subt.textContent = b.dataset.estado;
+      sala.atualizarDispositivo(b.dataset.id, { estado: b.dataset.estado });
       await salvar(b.dataset.id, { estado: b.dataset.estado });
     }));
     // Slider: mostra o valor enquanto arrasta e só salva quando solta.
@@ -176,7 +188,7 @@ Paginas.casa = {
         $(`#sub-${d.id}`).textContent = sub({ ...d, valor: r.value });
         if (aoVivo && Date.now() - ultimo > 150) { ultimo = Date.now(); API.dispositivo(d.id, { valor: Number(r.value) }).catch(() => {}); }
       };
-      r.onchange = () => salvar(d.id, { valor: Number(r.value) });
+      r.onchange = () => { sala.atualizarDispositivo(d.id, { valor: Number(r.value) }); salvar(d.id, { valor: Number(r.value) }); };
     });
   },
 };
@@ -187,6 +199,9 @@ function abrirGerenciar(recarregar) {
   dlg.innerHTML = `<h3>Gerenciar dispositivos</h3>
     <button class="item" data-painel="lampada"><span class="ico">${icone('lampada')}</span><span class="txt">Lâmpada inteligente<small>Testar, mudar a cor, escolher a lâmpada</small></span></button>
     <button class="item" data-painel="bluetooth"><span class="ico">${icone('tv')}</span><span class="txt">TV e Som · Bluetooth<small>Conectar caixinhas e fones ao computador</small></span></button>
+    <button class="item" data-painel="aparelhos"><span class="ico">${icone('conexoes')}</span><span class="txt">Aparelhos conectados<small>O que está ligado à casa (Smart Life / Tuya)</small></span></button>
+    <button class="item" data-painel="celular"><span class="ico">${icone('celular')}</span><span class="txt">Celular como controle<small>QR code: o celular controla a sala</small></span></button>
+    <button class="item" data-painel="ajuda"><span class="ico">${icone('ajuda')}</span><span class="txt">Como conectar<small>Passo a passo de cada tecnologia</small></span></button>
     <div class="acoes"><button class="btn" data-fechar>Fechar</button></div>`;
   document.body.appendChild(dlg);
   dlg.showModal();
@@ -195,6 +210,9 @@ function abrirGerenciar(recarregar) {
   dlg.querySelectorAll('[data-painel]').forEach((b) => (b.onclick = () => {
     dlg.close();
     if (b.dataset.painel === 'lampada') abrirPainelLampada();
+    else if (b.dataset.painel === 'aparelhos') abrirPainelAparelhos(recarregar);
+    else if (b.dataset.painel === 'celular') abrirQrControle();
+    else if (b.dataset.painel === 'ajuda') abrirComoConectar();
     else abrirPainelBluetooth(recarregar);
   }));
 }
@@ -349,4 +367,146 @@ async function abrirPainelLampada() {
       $$('#lista-dev [data-id]', box).forEach((b) => (b.onclick = () => { box.querySelector('#dev').value = b.dataset.id; }));
     } catch (e) { toast(e.message); }
   };
+}
+
+// [+] APARELHOS CONECTADOS: mostra o que está ligado à casa (sem configurar nada na mão).
+// Cortina e ar da conta Smart Life são reconhecidos pelo TIPO e conectados sozinhos.
+const TIPOS_TUYA = {
+  dj: 'Lâmpada', dd: 'Fita de LED', fwd: 'Luz ambiente', dc: 'Cordão de luz', cl: 'Cortina', clkg: 'Interruptor de cortina',
+  kt: 'Ar-condicionado', ktkzq: 'Controle de ar', infrared_ac: 'Ar-condicionado (infravermelho)', wnykq: 'Controle universal infravermelho',
+  qt: 'Hub infravermelho', cz: 'Tomada', pc: 'Régua', kg: 'Interruptor', wk: 'Termostato', fs: 'Ventilador', sp: 'Câmera',
+};
+const FUNCAO_POR_TIPO = { cl: 'cortinas', clkg: 'cortinas', kt: 'temperatura', ktkzq: 'temperatura', wk: 'temperatura', infrared_ac: 'temperatura' };
+
+async function abrirPainelAparelhos(recarregar) {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet';
+  dlg.innerHTML = `<h3>Aparelhos conectados</h3><div id="ap">${carregando()}</div>
+    <div class="acoes"><button class="btn" id="ap-ajuda">${icone('ajuda')} Como conectar</button><button class="btn btn-primario" data-fechar>Fechar</button></div>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  let mudou = false;
+  dlg.addEventListener('close', () => { dlg.remove(); if (mudou) recarregar(); });
+  dlg.querySelector('[data-fechar]').onclick = () => dlg.close();
+  dlg.querySelector('#ap-ajuda').onclick = () => { dlg.close(); abrirComoConectar('aparelhos'); };
+  const box = dlg.querySelector('#ap');
+
+  let casa, lampada, conta = [];
+  try { [casa, lampada] = await Promise.all([API.casa(), API.lampada()]); } catch (e) { box.innerHTML = erroBox(e); return; }
+  const real = lampada.modo === 'real';
+  if (real) {
+    try { const r = await API.lampadaDispositivos(); conta = Array.isArray(r) ? r : r?.devices || []; } catch { conta = []; }
+  }
+
+  // Conecta sozinho: cortina/ar da conta que ainda não estão ligados à casa
+  const avisosAuto = [];
+  for (const tipo of ['cortinas', 'temperatura']) {
+    const d = casa.dispositivos.find((x) => x.tipo === tipo);
+    if (!d || d.tuya_device_id) continue;
+    const achado = conta.find((x) => FUNCAO_POR_TIPO[x.category] === tipo && (x.category !== 'infrared_ac' || x.gateway_id));
+    if (!achado) continue;
+    const id = achado.category === 'infrared_ac' ? `ir:${achado.gateway_id}:${achado.id}` : achado.id;
+    try { await API.configurarAparelho(d.id, id); d.tuya_device_id = id; mudou = true; avisosAuto.push(`${achado.name} conectado como ${d.nome}`); } catch { /* fica simulado */ }
+  }
+
+  const nomeNaConta = (id) => {
+    const limpo = String(id || '').startsWith('ir:') ? id.split(':')[2] : id;
+    return conta.find((x) => x.id === limpo);
+  };
+  const usoDe = (id) => {
+    if (id === lampada.device_id) return 'Iluminação';
+    const d = casa.dispositivos.find((x) => x.tuya_device_id && (x.tuya_device_id === id || x.tuya_device_id.endsWith(':' + id)));
+    return d ? d.nome : null;
+  };
+  const ICONE_FUNCAO = { iluminacao: 'lampada', cortinas: 'cortina', temperatura: 'termometro', tv_som: 'som' };
+  const statusDe = (d) => {
+    if (d.tipo === 'iluminacao') {
+      const a = nomeNaConta(lampada.device_id);
+      return real && lampada.device_id ? { ok: true, texto: a ? `${a.name} · ${a.online ? 'online' : 'offline'}` : 'Lâmpada da nuvem Tuya' } : { ok: false, texto: 'Simulada: a Tuya não está configurada no servidor' };
+    }
+    if (d.tipo === 'tv_som') return casa.som?.modo === 'real' ? { ok: true, texto: `Som do computador · ${casa.som.nome || ''}` } : { ok: false, texto: 'Simulado' };
+    if (!d.tuya_device_id) return { ok: false, texto: 'Simulado: nenhum aparelho conectado' };
+    const a = nomeNaConta(d.tuya_device_id);
+    return { ok: true, texto: a ? `${a.name} · ${a.online ? 'online' : 'offline'}` : 'Aparelho Tuya' };
+  };
+
+  box.innerHTML = `
+    <p class="texto-suave" style="margin-bottom:12px">${real
+      ? 'Conectado à nuvem <b>Tuya</b> (a mesma do app Smart Life). Pareie um aparelho no Smart Life e ele aparece aqui sozinho.'
+      : 'A nuvem Tuya ainda <b>não está configurada</b> no servidor: tudo funciona em simulação. Veja "Como conectar".'}</p>
+    ${avisosAuto.length ? `<p class="aparelhos-auto">${icone('check')} ${avisosAuto.map(esc).join(' · ')}</p>` : ''}
+    <h4 class="aparelhos-sub">Na sua casa</h4>
+    <ul class="aparelhos-lista">
+      ${casa.dispositivos.map((d) => { const st = statusDe(d); return `
+        <li><span class="ico">${icone(ICONE_FUNCAO[d.tipo] || 'casa')}</span>
+          <span class="txt"><b>${esc(d.nome)}</b><small>${esc(st.texto)}</small></span>
+          <span class="badge ${st.ok ? 'badge-ok' : ''}">${st.ok ? 'Conectado' : 'Simulado'}</span></li>`; }).join('')}
+    </ul>
+    ${real ? `<h4 class="aparelhos-sub">Na sua conta Smart Life</h4>
+    <ul class="aparelhos-lista">
+      ${conta.map((x) => `<li><span class="ico">${icone(FUNCAO_POR_TIPO[x.category] === 'cortinas' ? 'cortina' : FUNCAO_POR_TIPO[x.category] === 'temperatura' ? 'termometro' : x.category === 'dj' ? 'lampada' : 'conexoes')}</span>
+        <span class="txt"><b>${esc(x.name)}</b><small>${esc(TIPOS_TUYA[x.category] || 'Aparelho')} · ${x.online ? 'online' : 'offline'}</small></span>
+        ${usoDe(x.id) ? `<span class="badge badge-ok">Em uso: ${esc(usoDe(x.id))}</span>` : '<span class="badge">Livre</span>'}</li>`).join('') || '<li class="texto-suave">Nenhum aparelho na conta vinculada.</li>'}
+    </ul>` : ''}
+    <details class="aparelhos-avancado"><summary>Configuração manual (avançado)</summary>
+      <p class="texto-suave">Só se o aparelho não for reconhecido sozinho. Ar comum com controle infravermelho: <code>ir:ID_DO_HUB:ID_DO_CONTROLE</code>. Vazio = volta a ser simulado.</p>
+      ${casa.dispositivos.filter((d) => ['cortinas', 'temperatura'].includes(d.tipo)).map((d) => `
+        <label class="aparelho-cfg"><span>${esc(d.nome)}</span>
+          <input class="campo" data-cfg="${d.id}" value="${esc(d.tuya_device_id || '')}" placeholder="ID do aparelho Tuya" aria-label="ID do aparelho ${esc(d.nome)}">
+          <button type="button" class="btn" data-salvar="${d.id}">Salvar</button><button type="button" class="btn" data-testar="${d.id}">Testar</button></label>`).join('')}
+    </details>`;
+
+  $$('[data-salvar]', box).forEach((b) => (b.onclick = async () => {
+    try { await API.configurarAparelho(b.dataset.salvar, $(`[data-cfg="${b.dataset.salvar}"]`, box).value.trim()); mudou = true; toast('Aparelho salvo'); }
+    catch (e) { toast(e.message); }
+  }));
+  $$('[data-testar]', box).forEach((b) => (b.onclick = async () => {
+    try { toast((await API.testarAparelho(b.dataset.testar)).mensagem); } catch (e) { toast(e.message); }
+  }));
+}
+
+// [+] "Como conectar": passo a passo de cada tecnologia da casa
+function abrirComoConectar(abrir = '') {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet ajuda-casa';
+  const sec = (id, ico, titulo, corpo) => `<details ${abrir === id ? 'open' : ''}><summary>${icone(ico)} ${titulo}</summary><div class="ajuda-corpo">${corpo}</div></details>`;
+  dlg.innerHTML = `<h3>Como conectar a casa</h3>
+    <p class="texto-suave" style="margin-bottom:12px">Tudo que é <b>real</b> passa pela nuvem Tuya (a mesma do app Smart Life) ou pelo próprio computador. O que não está conectado fica <b>simulado</b>: aparece na Sala ao vivo, mas não mexe em nada de verdade.</p>
+    ${sec('lampada', 'lampada', 'Lâmpada inteligente', `<ol>
+      <li>Pareie a lâmpada no app <b>Smart Life</b> (não no app da marca).</li>
+      <li>Crie um projeto grátis em <b>platform.tuya.com</b> e vincule a conta do Smart Life.</li>
+      <li>Coloque <code>TUYA_CLIENT_ID</code>, <code>TUYA_SECRET</code> e <code>TUYA_DEVICE_ID</code> no <code>segredos.properties</code> e reinicie o servidor pelo <code>rodar.cmd</code>.</li>
+      <li>Gerenciar, Lâmpada, <b>Testar (piscar)</b>. Passo a passo completo no <b>LAMPADA.md</b>.</li></ol>`)}
+    ${sec('aparelhos', 'cortina', 'Cortina e ar-condicionado', `<ol>
+      <li>Compre modelos que digam <b>"compatível com Tuya / Smart Life"</b> (motor de cortina Wi-Fi, ar com Wi-Fi).</li>
+      <li>Pareie no app Smart Life, com a mesma conta da lâmpada.</li>
+      <li>Abra Gerenciar, <b>Aparelhos conectados</b>: o site reconhece a cortina e o ar pelo tipo e <b>conecta sozinho</b>.</li>
+      <li><b>Ar comum, sem Wi-Fi?</b> Use um <b>controle universal infravermelho</b> Tuya: cadastre o ar nele pelo Smart Life. Ele também aparece sozinho.</li>
+      <li>Pronto: cenas, atmosferas, voz, gestos e o celular passam a mexer no aparelho de verdade. O selo muda de "Simulado" pra <b>Conectado</b>.</li></ol>`)}
+    ${sec('som', 'som', 'TV e Som (Bluetooth)', `<ol>
+      <li>O som real é o do <b>computador onde o servidor roda</b> (Windows).</li>
+      <li>Gerenciar, <b>TV e Som · Bluetooth</b>, "Procurar novos" com a caixinha/fone em modo de pareamento.</li>
+      <li>Celular: em "Celulares", <b>Tocar aqui</b>: o som do celular sai no computador.</li></ol>`)}
+    ${sec('celular', 'celular', 'Celular como controle (QR code)', `<ol>
+      <li>Celular e computador no <b>mesmo Wi-Fi</b>.</li>
+      <li>Sala ao vivo, botão <b>Celular</b>: aponte a câmera do celular pro QR code.</li>
+      <li>Não abriu? Na 1ª vez, o Windows pergunta se o Java pode usar a rede: marque <b>Redes privadas</b>. E deixe o Wi-Fi do PC como rede <b>Privada</b>.</li>
+      <li>O acesso pelo QR vale <b>12 horas</b>. Depois, é só gerar outro.</li></ol>`)}
+    ${sec('votacao', 'urna', 'Votação', `<ol>
+      <li>No menu da esquerda, <b>Votação</b>: escolha de 2 a 6 filmes e clique em <b>Abrir votação</b>.</li>
+      <li>Os amigos escaneiam o QR e votam pelo celular, <b>sem precisar de conta</b>. 1 voto por celular, dá pra trocar.</li>
+      <li><b>Encerrar e assistir o vencedor</b>: o filme começa com a sala no clima dele.</li></ol>`)}
+    ${sec('voz', 'microfone', 'Comando de voz', `<p>Botão <b>Voz</b> (Chrome ou Edge, com internet). Clique uma vez e fale vários comandos; clique de novo pra desligar.</p><ul>
+      <li>"<b>LetterRoyale, modo terror</b>" · "clima de romance" · "modo ação"</li>
+      <li>"<b>intervalo</b>" · "<b>continuar</b>" · "encerrar filme" · "próximo da fila"</li>
+      <li>"fechar cortinas" · "luz 40 por cento" · "ar vinte e dois graus" · "volume 30"</li></ul>`)}
+    ${sec('gestos', 'mao', 'Gestos pela webcam', `<ol>
+      <li>Sala ao vivo, botão <b>Gestos</b>: permita a câmera. Na 1ª vez baixa a IA (~8 MB).</li>
+      <li><b>Mão aberta</b>, segurando ~1 s = intervalo. <b>Joinha</b> = volta pro filme.</li>
+      <li>A imagem da câmera <b>não sai do computador</b>: a IA (MediaPipe, do Google) roda no navegador.</li></ol>`)}
+    <div class="acoes"><button class="btn btn-primario" data-fechar>Fechar</button></div>`;
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.querySelector('[data-fechar]').onclick = () => dlg.close();
 }

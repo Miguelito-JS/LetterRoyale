@@ -57,6 +57,7 @@ public class UsuariosController {
         Map<String, Object> f = TmdbService.doCache(l);
         f.put("minha_nota", l.get("minha_nota"));
         f.put("status", l.get("status"));
+        f.put("assistido_em", l.get("assistido_em") == null ? null : String.valueOf(l.get("assistido_em")));
         return f;
     }
 

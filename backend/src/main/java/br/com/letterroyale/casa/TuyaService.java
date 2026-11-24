@@ -145,21 +145,63 @@ public class TuyaService {
 
     /** POST /v1.0/iot-03/devices/{id}/commands */
     private void enviar(String deviceId, List<Map<String, Object>> comandos) {
-        if (!configurado() || deviceId.isEmpty()) {
-            log.info("💡 [SIMULAÇÃO] lâmpada <- {}", comandos);
+        enviarComandos(deviceId, "lâmpada", comandos);
+    }
+
+    // =================================================================
+    //  [+] OUTROS APARELHOS TUYA (cortina, ar-condicionado...) — ver casa/aparelhos/
+    // =================================================================
+
+    /** Manda comandos pra QUALQUER aparelho Tuya (rótulo = nome que aparece no log). */
+    public void enviarComandos(String deviceId, String rotulo, List<Map<String, Object>> comandos) {
+        if (!configurado() || deviceId == null || deviceId.isEmpty()) {
+            log.info("💡 [SIMULAÇÃO] {} <- {}", rotulo, comandos);
             return;
         }
+        enviarDeVerdade(deviceId, rotulo, comandos);
+    }
+
+    /** Lista bruta das funções do aparelho (códigos aceitos + limites). null no modo simulação. */
+    public synchronized JsonNode funcoesDoAparelho(String deviceId) {
+        if (!configurado() || deviceId == null || deviceId.isEmpty()) return null;
+        return funcoesBrutas.computeIfAbsent(deviceId, id ->
+                chamar("GET", "/v1.0/iot-03/devices/" + id + "/functions", null).path("result").path("functions"));
+    }
+
+    private final Map<String, JsonNode> funcoesBrutas = new HashMap<>();
+
+    /** Ar-condicionado comum pelo hub infravermelho Tuya (controle universal). */
+    public void comandoArInfravermelho(String hubId, String controleId, Map<String, Object> corpo) {
+        if (!configurado()) {
+            log.info("💡 [SIMULAÇÃO] ar (infravermelho) <- {}", corpo);
+            return;
+        }
+        try {
+            JsonNode r = chamar("POST", "/v2.0/infrareds/" + hubId + "/air-conditioners/" + controleId + "/scenes/command",
+                    json.writeValueAsString(corpo));
+            if (!r.path("success").asBoolean(false)) {
+                throw new LampadaException("A Tuya recusou o comando do ar: " + r.path("msg").asText("?"));
+            }
+            log.info("💡 ar (infravermelho) <- {}", corpo);
+        } catch (LampadaException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LampadaException("Não consegui falar com o hub infravermelho: " + e.getMessage());
+        }
+    }
+
+    private void enviarDeVerdade(String deviceId, String rotulo, List<Map<String, Object>> comandos) {
         try {
             String corpo = json.writeValueAsString(Map.of("commands", comandos));
             JsonNode r = chamar("POST", "/v1.0/iot-03/devices/" + deviceId + "/commands", corpo);
             if (!r.path("success").asBoolean(false)) {
                 throw new LampadaException("A Tuya recusou o comando: " + r.path("msg").asText("?"));
             }
-            log.info("💡 lâmpada <- {}", comandos);
+            log.info("💡 {} <- {}", rotulo, comandos);
         } catch (LampadaException e) {
             throw e;
         } catch (Exception e) {
-            throw new LampadaException("Não consegui falar com a lâmpada: " + e.getMessage());
+            throw new LampadaException("Não consegui falar com a " + rotulo + ": " + e.getMessage());
         }
     }
 

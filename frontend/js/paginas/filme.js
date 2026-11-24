@@ -177,10 +177,10 @@ Paginas.filme = {
       elenco: () => `<div class="grade">${f.elenco.map((p) => `
         <div class="filme-card"><div class="poster">${p.foto ? `<img src="${esc(p.foto)}" alt="" loading="lazy">` : `<div class="sem-poster">${esc(p.nome)}</div>`}</div>
         <h3>${esc(p.nome)}</h3><div class="meta">${esc(p.personagem)}</div></div>`).join('')}</div>`,
-      onde: () => f.onde_assistir.length
+      onde: () => cinemaHtml(f.cinema, f.titulo) + (f.onde_assistir.length
         ? f.onde_assistir.map((p) => `<div class="item"><img src="${esc(p.logo)}" alt="" style="width:40px;height:40px;border-radius:8px"><span class="txt">${esc(p.nome)}<small>${p.tipo}</small></span></div>`).join('')
           + '<p class="meta" style="margin-top:12px">Dados de streaming: JustWatch via TMDB</p>'
-        : vazio('Não está em nenhum streaming no Brasil agora.'),
+        : f.cinema ? '<p class="meta" style="margin-top:12px">Ainda não está em nenhum streaming no Brasil.</p>' : vazio('Não está em nenhum streaming no Brasil agora.')),
       temporadas: () => `
         <div class="temporadas-escolha">
           <select class="chip" id="sel-temp" aria-label="Temporada">
@@ -241,7 +241,9 @@ function ligarTemporadas(f) {
       };
       box.innerHTML = t.episodios.length ? `<ol class="episodios">${t.episodios.map((e) => `
         <li class="episodio ${e.data && e.data > hoje ? 'futuro' : ''} ${ehEste(e) ? 'passando' : ''}">
-          <div class="ep-img">${e.imagem ? `<img src="${esc(e.imagem)}" alt="" loading="lazy">` : `<span>${e.numero}</span>`}</div>
+          <div class="ep-img">${e.imagem ? `<img src="${esc(e.imagem)}" alt="" loading="lazy">` : e.data && e.data > hoje
+            ? `<span class="ep-contagem" aria-label="Episódio ${e.numero}, ainda não saiu"><span class="cruz"></span><b>${e.numero}</b><small>Em breve</small></span>`
+            : `<span>${e.numero}</span>`}</div>
           <div class="ep-txt">
             <b>${e.numero}. ${esc(e.nome)}</b>
             <div class="meta">${[e.data && (e.data > hoje ? `Estreia em ${dataBR(e.data)}` : dataBR(e.data)), duracao(e.duracao_min), e.nota && `<span class="estrela">★</span> ${e.nota}`].filter(Boolean).join(' • ')}</div>
@@ -360,4 +362,21 @@ function graficoNotas(reviews) {
         <span class="qtd">${f.qtd}</span>
       </div>`).join('')}
   </div>`;
+}
+
+// [+] "Nos cinemas": filme sem streaming por assinatura que está em cartaz ou estreando
+function cinemaHtml(c, titulo) {
+  if (!c) return '';
+  const data = new Date(c.estreia + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' });
+  const emBreve = c.situacao === 'em_breve';
+  return `
+    <div class="nos-cinemas">
+      <span class="nos-cinemas-ico">${icone('ingresso')}</span>
+      <div class="txt">
+        <span class="badge" style="color:var(--gold)">${emBreve ? 'EM BREVE' : 'EM CARTAZ'}</span>
+        <b>${emBreve ? `Estreia nos cinemas em ${esc(data)}` : 'Nos cinemas agora'}</b>
+        <small>${emBreve ? 'Ainda não estreou. Coloque em "Quero assistir" pra lembrar.' : `Estreou em ${esc(data)}. Veja as sessões perto de você.`}</small>
+      </div>
+      <a class="btn btn-primario" href="${esc(c.link_sessoes)}" target="_blank" rel="noopener">${emBreve ? 'Ver pré-venda' : 'Ver sessões'}</a>
+    </div>`;
 }

@@ -78,13 +78,14 @@ const ABAS_RENDER = {
             ${pr.total ? `<a class="link" href="#/meus-filmes/${status}?u=${u}${serie ? '&tipo=serie' : ''}">Mostrar tudo</a>` : ''}
           </div>
           ${carrosselHtml(pr.filmes.map(filmeCardComNota).join(''),
-            p.eu ? `Nada aqui ainda. Abra ${nomeItem} e toque em "Adicionar à" → ${s.nome}.` : 'Nada aqui ainda.')}
+            p.eu ? `Nada aqui ainda. Abra ${nomeItem} e toque em "Adicionar à" → ${s.nome}.` : 'Nada aqui ainda.',
+            { quero_assistir: 'ingresso', assistindo: 'pipoca', assistido: 'creditos', abandonado: 'saida' }[status])}
         </section>`;
     };
     return `
       <section class="secao">
         <div class="secao-topo"><h2>Favoritos</h2></div>
-        ${carrosselHtml(favs.map(filmeCard).join(''), `Toque em ❤ Favoritar em ${nomeItem} para ${serie ? 'ela' : 'ele'} aparecer aqui.`)}
+        ${carrosselHtml(favs.map(filmeCard).join(''), `Toque em Favoritar em ${nomeItem} para ${serie ? 'ela' : 'ele'} aparecer aqui.`, 'coracao')}
       </section>
       ${['quero_assistir', 'assistindo', 'assistido', 'abandonado'].map(prateleira).join('')}`;
   },

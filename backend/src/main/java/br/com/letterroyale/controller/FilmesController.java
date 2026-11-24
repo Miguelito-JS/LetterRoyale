@@ -4,13 +4,20 @@ import br.com.letterroyale.casa.PaletaService;
 import br.com.letterroyale.erro.ApiException;
 import br.com.letterroyale.seguranca.Auth;
 import br.com.letterroyale.seguranca.UsuarioLogado;
+import br.com.letterroyale.tmdb.BannerService;
+import br.com.letterroyale.tmdb.CuradoriaSemelhantes;
+import br.com.letterroyale.tmdb.NosCinemas;
+import br.com.letterroyale.tmdb.TituloSaga;
 import br.com.letterroyale.tmdb.TmdbService;
 import br.com.letterroyale.util.Db;
 import br.com.letterroyale.util.Json;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -24,14 +31,47 @@ public class FilmesController {
     private final TmdbService tmdb;
     private final Db db;
     private final PaletaService paletas;
+    private final BannerService banners;
 
-    public FilmesController(TmdbService tmdb, Db db, PaletaService paletas) {
+    public FilmesController(TmdbService tmdb, Db db, PaletaService paletas, BannerService banners) {
         this.tmdb = tmdb;
         this.db = db;
         this.paletas = paletas;
+        this.banners = banners;
     }
 
     /** GET /api/filmes/{id}/paleta -> cores do pôster (as que a lâmpada usa no Modo Cinema) */
+    /**
+     * GET /api/filmes/sugestoes?q=naru -> até 6 títulos (filme ou série) enquanto a pessoa digita na busca.
+     * Uma chamada só ao TMDB (/search/multi): rápido pra aparecer a cada letra.
+     * Ordem: título igual > começa com > tem a palavra > resto; empate = mais popular.
+     */
+    @GetMapping("/sugestoes")
+    public List<Map<String, Object>> sugestoes(@RequestParam String q) {
+        String busca = q == null ? "" : q.trim();
+        if (busca.length() < 2) return List.of();
+        String qn = normal(busca);
+        List<JsonNode> achados = new ArrayList<>();
+        tmdb.tmdb("/search/multi", "query", busca, "page", 1, "include_adult", false).path("results").forEach(r -> {
+            String mt = r.path("media_type").asText();
+            if (("movie".equals(mt) || "tv".equals(mt)) && !r.path("poster_path").asText("").isBlank()) achados.add(r);
+        });
+        achados.sort(Comparator.<JsonNode>comparingInt(r -> notaTitulo(r, qn))
+                .thenComparing(r -> -r.path("popularity").asDouble(0)));
+        List<Map<String, Object>> r = new ArrayList<>();
+        for (JsonNode f : achados) {
+            if (r.size() >= 6) break;
+            r.add("tv".equals(f.path("media_type").asText()) ? tmdb.resumoSerie(f) : tmdb.resumo(f));
+        }
+        return r;
+    }
+
+    /** GET /api/filmes/foco?url=... -> { proporcao, perfil[40] }: onde está o assunto da imagem (verificador de banner) */
+    @GetMapping("/foco")
+    public Map<String, Object> foco(@RequestParam String url) {
+        return banners.foco(url);
+    }
+
     @GetMapping("/{id}/paleta")
     public List<String> paleta(@PathVariable long id) {
         return paletas.paleta(id);
@@ -55,6 +95,125 @@ public class FilmesController {
             r.add(tmdb.resumoSerie(s));
         }
         return r;
+    }
+
+    /**
+     * SEMELHANTES de verdade (o "similar" do TMDB só compara palavras-chave e traz filme nada a ver):
+     *   1º os outros filmes da MESMA SAGA, só os relevantes (CuradoriaSemelhantes), em ordem de lançamento
+     *   2º filmes conhecidos do ATOR principal
+     *   3º as RECOMENDAÇÕES do TMDB (quem gostou deste também gostou de...)
+     *   4º se ainda faltar: filmes populares dos MESMOS GÊNEROS
+     */
+    private List<Map<String, Object>> semelhantesFilme(JsonNode f, int max) {
+        long id = f.path("id").asLong();
+        Map<Long, JsonNode> achados = new LinkedHashMap<>();
+
+        LocalDate hoje = LocalDate.now();
+        // Tudo que depende só do filme sai AO MESMO TEMPO (coleção, filmes do ator, gênero e as coleções pelo nome)
+        long colecaoPropria = f.path("belongs_to_collection").path("id").asLong(0);
+        JsonNode protagonista = f.path("credits").path("cast").path(0);
+        List<String> generos = new ArrayList<>();
+        f.path("genres").forEach(g -> { if (generos.size() < 2) generos.add(g.path("id").asText()); });
+
+        var propriaF = colecaoPropria == 0 ? null : tmdb.emParalelo(() -> tmdb.tmdb("/collection/" + colecaoPropria));
+        var atorF = protagonista.path("id").isNumber()
+                ? tmdb.emParalelo(() -> tmdb.tmdb("/person/" + protagonista.path("id").asLong() + "/movie_credits")) : null;
+        var generoF = generos.isEmpty() ? null : tmdb.emParalelo(() -> tmdb.tmdb("/discover/movie", "with_genres", String.join(",", generos),
+                "sort_by", "popularity.desc", "vote_count.gte", 300, "include_adult", false));
+        List<java.util.concurrent.CompletableFuture<JsonNode>> outrasF = new ArrayList<>();
+        for (Long colecaoId : colecoesPeloNome(f.path("title").asText(""), f.path("original_title").asText(""))) {
+            if (colecaoId != colecaoPropria) outrasF.add(tmdb.emParalelo(() -> tmdb.tmdb("/collection/" + colecaoId)));
+        }
+
+        // 1º A SAGA: a coleção do PRÓPRIO filme (a sequência direta), depois as outras coleções da saga achadas
+        //    pelo nome ("Jogos Vorazes: ..." -> "Jogos Vorazes"; o TMDB às vezes separa os prequels numa coleção própria).
+        //    Em todas, a CURADORIA tira o que ninguém conhece e põe em ordem de lançamento.
+        List<JsonNode> propria = new ArrayList<>(), outras = new ArrayList<>();
+        TmdbService.resultado(propriaF).path("parts").forEach(propria::add);
+        for (var o : outrasF) TmdbService.resultado(o).path("parts").forEach(outras::add);
+        juntar(achados, curar(propria, hoje), id);
+        juntar(achados, curar(outras, hoje), id);
+
+        // 2º filmes conhecidos do ATOR principal (a "coleção" dele)
+        if (atorF != null && achados.size() < max) {
+            Map<Long, JsonNode> porId = new LinkedHashMap<>();
+            TmdbService.resultado(atorF).path("cast").forEach(x -> porId.putIfAbsent(x.path("id").asLong(), x));
+            List<JsonNode> escolhidos = new ArrayList<>();
+            for (CuradoriaSemelhantes.Item i : CuradoriaSemelhantes.doAtor(itens(porId.values()), 6)) escolhidos.add(porId.get(i.id()));
+            juntar(achados, escolhidos, id);
+        }
+
+        juntar(achados, f.path("recommendations").path("results"), id);
+        if (achados.size() < max) juntar(achados, TmdbService.resultado(generoF).path("results"), id);
+        ArrayNode lista = JsonNodeFactory.instance.arrayNode();
+        achados.values().forEach(lista::add);
+        return resumos(lista, max);
+    }
+
+    /** Passa as partes de uma coleção pela curadoria (relevantes, em ordem de lançamento). */
+    private static List<JsonNode> curar(List<JsonNode> partes, LocalDate hoje) {
+        Map<Long, JsonNode> porId = new LinkedHashMap<>();
+        partes.forEach(p -> porId.putIfAbsent(p.path("id").asLong(), p));
+        List<JsonNode> r = new ArrayList<>();
+        for (CuradoriaSemelhantes.Item i : CuradoriaSemelhantes.relevantesDaSaga(itens(porId.values()), hoje)) r.add(porId.get(i.id()));
+        return r;
+    }
+
+    private static List<CuradoriaSemelhantes.Item> itens(Iterable<JsonNode> lista) {
+        List<CuradoriaSemelhantes.Item> r = new ArrayList<>();
+        for (JsonNode x : lista) r.add(new CuradoriaSemelhantes.Item(x.path("id").asLong(), x.path("vote_count").asInt(0), x.path("release_date").asText("")));
+        return r;
+    }
+
+    /** Procura as coleções (saga) pelo começo do título: "Jogos Vorazes: A Esperança" -> busca "Jogos Vorazes". */
+    private List<Long> colecoesPeloNome(String... titulos) {
+        List<String> sagas = new ArrayList<>();
+        List<java.util.concurrent.CompletableFuture<JsonNode>> buscas = new ArrayList<>();
+        for (String titulo : titulos) {
+            String saga = TituloSaga.prefixo(titulo);
+            if (saga == null || sagas.contains(saga)) continue;
+            sagas.add(saga);
+            buscas.add(tmdb.emParalelo(() -> tmdb.tmdb("/search/collection", "query", saga)));
+        }
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < sagas.size(); i++) {
+            for (JsonNode c : TmdbService.resultado(buscas.get(i)).path("results")) {
+                long cid = c.path("id").asLong();
+                if (TituloSaga.mesmaSaga(sagas.get(i), c.path("name").asText("")) && !ids.contains(cid)) ids.add(cid);
+            }
+        }
+        return ids;
+    }
+
+    /** Série: recomendações primeiro; se o TMDB não tiver, cai no "similar". */
+    private List<Map<String, Object>> semelhantesSerie(JsonNode s, int max) {
+        long id = s.path("id").asLong();
+        Map<Long, JsonNode> achados = new LinkedHashMap<>();
+        juntar(achados, s.path("recommendations").path("results"), id);
+        if (achados.size() < max) juntar(achados, s.path("similar").path("results"), id);
+        ArrayNode lista = JsonNodeFactory.instance.arrayNode();
+        achados.values().forEach(lista::add);
+        return resumosSeries(lista, max);
+    }
+
+    /** Junta sem repetir, sem o próprio filme e sem item sem pôster. */
+    private static void juntar(Map<Long, JsonNode> achados, Iterable<JsonNode> lista, long idProprio) {
+        for (JsonNode x : lista) {
+            long xid = x.path("id").asLong();
+            if (xid != 0 && xid != idProprio && x.hasNonNull("poster_path")) achados.putIfAbsent(xid, x);
+        }
+    }
+
+    /** Data de estreia no CINEMA no Brasil (tipo 3 = cinema, 2 = limitado). Sem data do BR: data mundial. */
+    private static LocalDate estreiaNoCinemaBr(JsonNode f) {
+        for (JsonNode pais : f.path("release_dates").path("results")) {
+            if (!"BR".equals(pais.path("iso_3166_1").asText())) continue;
+            for (JsonNode rd : pais.path("release_dates")) {
+                int tipo = rd.path("type").asInt();
+                if (tipo == 3 || tipo == 2) return NosCinemas.data(rd.path("release_date").asText(null));
+            }
+        }
+        return NosCinemas.data(f.path("release_date").asText(null));
     }
 
     private static boolean ehSerie(String tipo) {
@@ -305,10 +464,19 @@ public class FilmesController {
         String qn = normal(q);
         List<Achado> achados = new ArrayList<>();
         java.util.Set<String> vistos = new java.util.HashSet<>();
-        for (int p = 1; p <= BUSCA_LOTES; p++) {
-            JsonNode d = tmdb.tmdb(caminho, "query", q, "page", p, "include_adult", false,
-                    "year", "filme".equals(tipo) ? ano : null,
-                    "first_air_date_year", "serie".equals(tipo) ? ano : null);
+        // 1º lote primeiro (diz quantas páginas existem); os outros lotes saem todos juntos
+        java.util.function.IntFunction<JsonNode> lote = p -> tmdb.tmdb(caminho, "query", q, "page", p, "include_adult", false,
+                "year", "filme".equals(tipo) ? ano : null,
+                "first_air_date_year", "serie".equals(tipo) ? ano : null);
+        JsonNode primeiro = lote.apply(1);
+        List<JsonNode> lotes = new ArrayList<>(List.of(primeiro));
+        List<java.util.concurrent.CompletableFuture<JsonNode>> resto = new ArrayList<>();
+        for (int p = 2; p <= Math.min(BUSCA_LOTES, primeiro.path("total_pages").asInt(1)); p++) {
+            final int pg = p;
+            resto.add(tmdb.emParalelo(() -> lote.apply(pg)));
+        }
+        resto.forEach(r -> lotes.add(TmdbService.resultado(r)));
+        for (JsonNode d : lotes) {
             for (JsonNode r : d.path("results")) {
                 String mt = switch (tipo) {
                     case "serie" -> "tv";
@@ -319,7 +487,6 @@ public class FilmesController {
                 if ("doc".equals(tipo) && !TmdbService.ehDocumentario(r)) continue;
                 if (vistos.add(mt + r.path("id").asLong())) achados.add(new Achado(r, mt, notaTitulo(r, qn)));
             }
-            if (p >= d.path("total_pages").asInt(0)) break;
         }
         long bons = achados.stream().filter(a -> a.nota() < 4).count();
         if (bons >= 10) achados.removeIf(a -> a.nota() == 4);
@@ -338,13 +505,18 @@ public class FilmesController {
 
         java.util.Set<Achado> franquia = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         if (p0 != null) {
-            JsonNode detP = detalhe(p0);
-            // Só os 20 candidatos mais votados são conferidos (cada um é uma consulta ao TMDB, guardada 5 min)
-            achados.stream().filter(a -> a != p0 && a.nota() <= 1)
+            // Só os 20 candidatos mais votados são conferidos (cada um é uma consulta ao TMDB, guardada 5 min).
+            // Todas as consultas (principal + 20) saem AO MESMO TEMPO.
+            var detPF = tmdb.emParalelo(() -> detalhe(p0));
+            List<Achado> candidatos = achados.stream().filter(a -> a != p0 && a.nota() <= 1)
                     .sorted(Comparator.comparingDouble((Achado a) -> a.r().path("vote_count").asDouble()).reversed())
-                    .limit(20)
-                    .filter(a -> ehDaFranquia(a, detalhe(a), detP, qn))
-                    .forEach(franquia::add);
+                    .limit(20).toList();
+            List<java.util.concurrent.CompletableFuture<JsonNode>> dets = new ArrayList<>();
+            for (Achado a : candidatos) dets.add(tmdb.emParalelo(() -> detalhe(a)));
+            JsonNode detP = TmdbService.resultado(detPF);
+            for (int i = 0; i < candidatos.size(); i++) {
+                if (ehDaFranquia(candidatos.get(i), TmdbService.resultado(dets.get(i)), detP, qn)) franquia.add(candidatos.get(i));
+            }
         }
         achados.sort(Comparator.comparingInt((Achado a) -> a == p0 ? 0 : franquia.contains(a) ? 1 : 2)
                 .thenComparing((a, b) -> franquia.contains(a) && franquia.contains(b)
@@ -402,6 +574,8 @@ public class FilmesController {
 
     /** Se o texto for o nome de um ator/diretor conhecido, devolve os filmes dele (40 por página). */
     private Map<String, Object> filmesDaPessoa(String q, int pag) {
+        // As duas buscas saem juntas (antes era uma depois da outra)
+        var multiF = tmdb.emParalelo(() -> tmdb.tmdb("/search/multi", "query", q, "include_adult", false));
         JsonNode pessoas = tmdb.tmdb("/search/person", "query", q, "include_adult", false).path("results");
         if (!pessoas.isArray() || pessoas.isEmpty()) return null;
         JsonNode p = pessoas.get(0);
@@ -411,7 +585,7 @@ public class FilmesController {
         if (!semAcento(nome).contains(semAcento(q)) || !(dep.equals("Acting") || dep.equals("Directing"))) return null;
         // "naruto" tem uma pessoa com esse nome, mas o que a pessoa procura é o anime:
         // se a busca geral do TMDB acha primeiro um filme/série, não é busca de pessoa
-        JsonNode multi = tmdb.tmdb("/search/multi", "query", q, "include_adult", false).path("results");
+        JsonNode multi = TmdbService.resultado(multiF).path("results");
         if (multi.isArray() && !multi.isEmpty() && !"person".equals(multi.get(0).path("media_type").asText())) return null;
 
         JsonNode cred = tmdb.tmdb("/person/" + p.path("id").asLong() + "/movie_credits");
@@ -463,7 +637,7 @@ public class FilmesController {
     @GetMapping("/{id}")
     public Map<String, Object> detalhes(@PathVariable long id, HttpServletRequest req) {
         if (TmdbService.ehSerie(id)) return detalhesSerie(id, req);
-        JsonNode f = tmdb.tmdb("/movie/" + id, "append_to_response", "credits,watch/providers,release_dates,similar,videos");
+        JsonNode f = tmdb.tmdb("/movie/" + id, "append_to_response", "credits,watch/providers,release_dates,recommendations,videos");
         tmdb.salvarNoCache(f);
 
         // Classificação indicativa do Brasil (ex.: "14")
@@ -534,7 +708,11 @@ public class FilmesController {
         r.put("direcao", direcao);
         r.put("elenco", elenco);
         r.put("onde_assistir", onde);
-        r.put("semelhantes", resumos(f.path("similar").path("results"), 12));
+        r.put("semelhantes", semelhantesFilme(f, 14));
+        // Não está em streaming por assinatura? Pode estar EM CARTAZ ou estreando nos cinemas
+        boolean temAssinatura = onde.stream().anyMatch(p -> "assinatura".equals(p.get("tipo")));
+        r.put("cinema", temAssinatura ? null
+                : NosCinemas.info(LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")), estreiaNoCinemaBr(f), f.path("title").asText("")));
         r.put("trailer_youtube", trailer);
         r.put("comunidade", Json.obj("media", nossa.get("media"), "total", nossa.get("total")));
         r.put("meu", meu);
@@ -559,7 +737,7 @@ public class FilmesController {
     /** Detalhes de uma SÉRIE (id negativo). Mesmas chaves do filme + temporadas. */
     private Map<String, Object> detalhesSerie(long id, HttpServletRequest req) {
         long tvId = -id;
-        JsonNode s = tmdb.tmdb("/tv/" + tvId, "append_to_response", "aggregate_credits,watch/providers,content_ratings,similar,videos");
+        JsonNode s = tmdb.tmdb("/tv/" + tvId, "append_to_response", "aggregate_credits,watch/providers,content_ratings,recommendations,similar,videos");
         tmdb.salvarSerieNoCache(s);
 
         String classificacao = null;
@@ -632,7 +810,7 @@ public class FilmesController {
         r.put("direcao", criacao);   // na série é "Criação"
         r.put("elenco", elenco);
         r.put("onde_assistir", onde);
-        r.put("semelhantes", resumosSeries(s.path("similar").path("results"), 12));
+        r.put("semelhantes", semelhantesSerie(s, 14));
         r.put("trailer_youtube", trailer);
         r.put("comunidade", Json.obj("media", nossa.get("media"), "total", nossa.get("total")));
         r.put("meu", estadoDoUsuario(id, req));

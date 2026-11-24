@@ -74,6 +74,12 @@
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
+        <!-- [+] Testes automatizados (JUnit 5): rodar com "mvn test" ou pelo IntelliJ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -50,6 +50,28 @@ public class TmdbService {
                 .build();
     }
 
+    // -----------------------------------------------------------------
+    // PARALELO: várias chamadas ao TMDB ao mesmo tempo (virtual threads do Java 21+).
+    // Antes a busca fazia até 26 chamadas uma atrás da outra (~4 s); juntas, levam o tempo da mais lenta.
+    // -----------------------------------------------------------------
+    private static final java.util.concurrent.ExecutorService PARALELO =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+
+    /** Começa uma tarefa em paralelo. Pegue o resultado com resultado(...). */
+    public <T> java.util.concurrent.CompletableFuture<T> emParalelo(java.util.function.Supplier<T> tarefa) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(tarefa, PARALELO);
+    }
+
+    /** Espera a tarefa. Se deu erro (TMDB fora, 404...), devolve um JSON vazio em vez de derrubar a página. */
+    public static JsonNode resultado(java.util.concurrent.CompletableFuture<JsonNode> f) {
+        if (f == null) return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        try {
+            return f.join();
+        } catch (Exception e) {
+            return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        }
+    }
+
     public String getRegiao() {
         return regiao;
     }

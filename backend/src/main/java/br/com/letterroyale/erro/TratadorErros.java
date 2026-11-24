@@ -6,6 +6,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
 
@@ -22,6 +23,14 @@ public class TratadorErros {
     @ExceptionHandler(DuplicateKeyException.class)
     public ResponseEntity<Map<String, String>> duplicado(DuplicateKeyException e) {
         return ResponseEntity.status(409).body(Map.of("erro", "Esse registro já existe."));
+    }
+
+    /** [+] Rota que não existe: quase sempre é o servidor rodando código antigo (esqueceram de reiniciar). */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, String>> naoExiste(NoResourceFoundException e) {
+        log.warn("Rota não existe neste servidor: {}", e.getResourcePath());
+        return ResponseEntity.status(404).body(Map.of("erro",
+                "Essa função não existe no servidor que está rodando. Reinicie o LetterRoyaleApplication pra carregar o código novo."));
     }
 
     @ExceptionHandler(Exception.class)

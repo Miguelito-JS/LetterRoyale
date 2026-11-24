@@ -6,10 +6,11 @@
 // soPc: no celular o item some da barra de baixo (vira atalho dentro do Perfil)
 const MENU = [
   { rota: 'inicio', nome: 'Início', ico: 'inicio' },
-  { rota: 'filmes', nome: 'Filmes e séries', curto: 'Filmes', ico: 'filmes', tambem: ['filme', 'serie'] },
+  { rota: 'filmes', nome: 'Catálogo', curto: 'Catálogo', ico: 'filmes', tambem: ['filme', 'serie'] },
   { rota: 'reviews', nome: 'Reviews', ico: 'reviews' },
   { rota: 'listas', nome: 'Listas', ico: 'listas', tambem: ['lista'] },
   { rota: 'casa', nome: 'Smart Home', ico: 'lampada', soPc: true },
+  { rota: 'votacao', nome: 'Votação', curto: 'Votação', ico: 'urna' },
   { rota: 'perfil', nome: 'Perfil', ico: 'perfil', tambem: ['meus-filmes', 'editar-perfil', 'conexoes'] },
 ];
 
@@ -94,6 +95,7 @@ function montarLayout(rota, titulo) {
     const tipo = rota.nome === 'filmes' && ['serie', 'filme', 'doc'].includes(rota.query.tipo) ? `&tipo=${rota.query.tipo}` : '';
     location.hash = q ? `#/filmes?q=${encodeURIComponent(q)}${tipo}` : '#/filmes';
   };
+  ligarSugestoes();
   $('#sair').onclick = () => sairDaConta();
   return $('#conteudo');
 }
@@ -108,7 +110,8 @@ async function navegar() {
   const pagina = Paginas[rota.nome];
   if (!pagina) { location.hash = '#/'; return; }
   if (!pagina.publica && !logado) { location.hash = '#/login'; return; }
-  if (pagina.publica && logado && rota.nome !== 'boas-vindas') { location.hash = '#/inicio'; return; }
+  // livre = abre logado ou não, sem o menu lateral (celular-controle e votação dos amigos)
+  if (pagina.publica && logado && rota.nome !== 'boas-vindas' && !pagina.livre) { location.hash = '#/inicio'; return; }
 
   window.scrollTo(0, 0);
   const titulo = typeof pagina.titulo === 'function' ? pagina.titulo(rota) : pagina.titulo;
@@ -117,6 +120,8 @@ async function navegar() {
   if (pagina.publica) {
     $('#app').innerHTML = '';
     await pagina.render($('#app'), rota);
+    // Celular-controle e votação dos amigos: os ícones de cinema também passeiam no fundo
+    if (pagina.livre) $('#app').insertAdjacentHTML('afterbegin', DECO_FUNDO.replace('fundo-app"', 'fundo-app fundo-livre"'));
   } else {
     const alvo = montarLayout(rota, titulo);
     alvo.innerHTML = carregando();
@@ -126,6 +131,7 @@ async function navegar() {
   }
   melhorarSelects($('#app'));   // troca as listas do navegador pela lista do site
   ligarSegmentados($('#app'));  // pílula que desliza nas opções
+  ajustarBanners($('#app'));    // banner não corta a cabeça de ninguém
 }
 
 // Quando um filme do Modo Cinema termina, o site pergunta a opinião (em qualquer tela)
@@ -202,7 +208,7 @@ async function proximoEpisodio(f) {
 // ---------------------------------------------------------------------
 // SININHO: bolinha com quantas não lidas + painel com as notificações
 // ---------------------------------------------------------------------
-const ICONE_NOTIF = { seguiu: 'perfil', review: 'reviews', curtida: 'coracao', estreou: 'filmes', episodio: 'play', cinema: 'lampada', lista: 'listas' };
+const ICONE_NOTIF = { conversa: 'reviews', seguiu: 'perfil', review: 'reviews', curtida: 'coracao', estreou: 'filmes', episodio: 'play', cinema: 'lampada', lista: 'listas' };
 let naoLidas = 0;
 
 function pintarSino(n) {
@@ -279,3 +285,68 @@ navegar();
 verificarFimDeFilme();
 setInterval(verificarFimDeFilme, 20000);   // confere a cada 20s se o filme acabou
 setInterval(contarNotificacoes, 60000);   // a bolinha do sininho se atualiza a cada 1 minuto
+
+// ---------------------------------------------------------------------
+// BUSCA COM SUGESTÕES: enquanto digita ("naru..."), aparece uma mini
+// seleção com pôster, nome, ano e tipo. Setas + Enter também funcionam.
+// ---------------------------------------------------------------------
+function ligarSugestoes() {
+  const form = $('#busca'), input = $('#q');
+  if (!form || !input) return;
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', 'sugestoes');
+  input.setAttribute('aria-expanded', 'false');
+  const caixa = document.createElement('div');
+  caixa.className = 'sugestoes';
+  caixa.id = 'sugestoes';
+  caixa.setAttribute('role', 'listbox');
+  caixa.hidden = true;
+  form.appendChild(caixa);
+
+  let espera = null, ultimaBusca = '', marcado = -1;
+  const cache = new Map();
+  const fechar = () => { caixa.hidden = true; input.setAttribute('aria-expanded', 'false'); marcado = -1; };
+  const itens = () => $$('.sugestao', caixa);
+  const marcar = (i) => {
+    const l = itens();
+    if (!l.length) return;
+    marcado = (i + l.length) % l.length;
+    l.forEach((el, j) => el.classList.toggle('marcada', j === marcado));
+    input.setAttribute('aria-activedescendant', l[marcado].id);
+  };
+  const desenhar = (q, lista) => {
+    if (input.value.trim() !== q) return;   // já digitou outra coisa
+    caixa.innerHTML = lista.length
+      ? lista.map((f, i) => `
+        <a class="sugestao" id="sug-${i}" role="option" href="#/filme/${f.id}" style="animation-delay:${i * 35}ms">
+          ${poster(f, 'sugestao-capa')}
+          <span class="sugestao-txt"><b>${esc(f.titulo)}</b><small>${[f.tipo === 'serie' ? 'Série' : f.documentario ? 'Documentário' : 'Filme', f.ano].filter(Boolean).join(' · ')}${f.nota ? ` · <span class="estrela">★</span> ${f.nota}` : ''}</small></span>
+        </a>`).join('') + `<a class="sugestao-todos" href="#/filmes?q=${encodeURIComponent(q)}">Ver todos os resultados de "${esc(q)}"</a>`
+      : `<p class="sugestao-nada">Nada com "${esc(q)}" ainda. Aperte Enter pra busca completa.</p>`;
+    caixa.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    marcado = -1;
+    $$('a', caixa).forEach((a) => a.addEventListener('click', () => { fechar(); input.blur(); }));
+  };
+  const buscar = async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { ultimaBusca = ''; return fechar(); }
+    if (q === ultimaBusca && !caixa.hidden) return;
+    ultimaBusca = q;
+    if (cache.has(q)) return desenhar(q, cache.get(q));
+    try { const r = await API.sugestoes(q); cache.set(q, r); desenhar(q, r); } catch { fechar(); }
+  };
+  input.addEventListener('input', () => { clearTimeout(espera); espera = setTimeout(buscar, 220); });
+  input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
+  input.addEventListener('keydown', (e) => {
+    if (caixa.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); marcar(marcado + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); marcar(marcado - 1); }
+    else if (e.key === 'Escape') fechar();
+    else if (e.key === 'Enter' && marcado >= 0) { e.preventDefault(); itens()[marcado].click(); location.hash = itens()[marcado]?.getAttribute('href') || location.hash; }
+  });
+  form.addEventListener('submit', fechar);
+  document.addEventListener('click', (e) => { if (!form.contains(e.target)) fechar(); });
+}

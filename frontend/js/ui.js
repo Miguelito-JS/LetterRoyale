@@ -7,6 +7,14 @@ function esc(t) {
   return String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** "ligado"/"desligado" concordando com o nome: Iluminação desligada, Cortinas ligadas, Ar ligado. */
+function generoEstado(nome, ligado) {
+  const n = String(nome || '').trim().toLowerCase().split(/\s+/)[0] || '';
+  const plural = n.endsWith('s') && n.length > 3;
+  const fem = (/(ção|ções|a|as|gem|dade)$/.test(n) || n === 'luz') && n !== 'tv' && n !== 'som';
+  return (ligado ? 'ligad' : 'desligad') + (fem ? 'a' : 'o') + (plural ? 's' : '');
+}
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -77,8 +85,93 @@ function estrelasTexto(n) {
 }
 
 const carregando = () => '<div class="carregando" aria-label="Carregando"></div>';
-const vazio = (txt) => `<div class="vazio">${esc(txt)}</div>`;
-const erroBox = (e) => `<div class="vazio">😕 ${esc(e.message)}</div>`;
+// ---------------------------------------------------------------------
+// TELAS VAZIAS: cada situação tem a sua cena animada (sem emoji).
+// O tema sai do próprio texto ("lista", "encontrado", "avaliou"...).
+//   avaliações   -> holofote varrendo o palco: "Nem um figurante por aqui"
+//   nada achado  -> rolo de feno passando:     "Só passou um rolo de feno"
+//   listas       -> prateleira com DVD caindo:  "Prateleira vazia"
+//   fila/amigos  -> poltronas vazias balançando
+//   aparelhos    -> antena procurando sinal:   "Sem sinal na sala"
+//   em gravação  -> claquete batendo:          "Ainda nas gravações"
+//   resto        -> bilhete girando:           "Corta! Nada por aqui"
+// ---------------------------------------------------------------------
+const CENAS_VAZIAS = {
+  palco: { titulo: 'Nem um figurante por aqui', arte: '<span class="cena-palco"><span class="holofote"></span><span class="facho"></span><span class="mancha"></span><span class="chao"></span></span>' },
+  feno: { titulo: 'Só passou um rolo de feno por aqui', arte: '<span class="cena-feno"><span class="feno"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="20" cy="20" r="16"/><path d="M8 14c8 2 16 0 24 6M10 26c6-6 14-8 22-4M14 8c2 8 0 16 6 24M26 9c-4 7-4 15 2 22"/></svg></span><span class="poeira"></span><span class="chao"></span></span>' },
+  prateleira: { titulo: 'Prateleira vazia', arte: '<span class="cena-prateleira"><span class="dvd"></span><span class="dvd cai"></span><span class="tabua"></span></span>' },
+  poltronas: { titulo: 'As poltronas estão vazias', arte: '<span class="cena-poltronas"><span class="poltrona"></span><span class="poltrona"></span><span class="poltrona"></span></span>' },
+  sinal: { titulo: 'Sem sinal na sala', arte: `<span class="cena-sinal"><span class="onda"></span><span class="onda"></span><span class="onda"></span><span class="antena">${typeof icone === 'function' ? icone('ondas') : ''}</span></span>` },
+  gravacao: { titulo: 'Ainda nas gravações', arte: '<span class="cena-claquete"></span>' },
+  bilhete: { titulo: 'Corta! Nada por aqui', arte: '<span class="cena-bilhete"></span>' },
+  // prateleiras do perfil
+  ingresso: { titulo: 'Nenhum ingresso na mão', arte: '<span class="cena-bilhete"></span>' },
+  pipoca: { titulo: 'A pipoca ainda está estourando', arte: '<span class="cena-pipoca"><span class="milho"></span><span class="milho"></span><span class="milho"></span><span class="balde"></span></span>' },
+  creditos: { titulo: 'Os créditos ainda não subiram', arte: '<span class="cena-creditos"><span class="tela"><i></i><i></i><i></i><i></i><i></i><i></i></span></span>' },
+  coracao: { titulo: 'Nenhum filme roubou seu coração ainda', arte: '<span class="cena-coracao"></span>' },
+  saida: { titulo: 'Ninguém saiu no meio da sessão', arte: '<span class="cena-bilhete"></span>' },
+};
+function temaVazio(txt) {
+  const t = String(txt || '').toLowerCase();
+  if (/avali|review/.test(t)) return 'palco';
+  if (/encontrad|tente outro/.test(t)) return 'feno';
+  if (/lista/.test(t)) return 'prateleira';
+  if (/fila|siga|seguir|amigo|pessoas/.test(t)) return 'poltronas';
+  if (/aparelho|pareado|celular|conta conectada|streaming|qr code/.test(t)) return 'sinal';
+  if (/epis|aqui ainda|estre|dados/.test(t)) return 'gravacao';
+  return 'bilhete';
+}
+const vazio = (txt, tema = temaVazio(txt)) => {
+  const c = CENAS_VAZIAS[tema] || CENAS_VAZIAS.bilhete;
+  return `<div class="vazio-cinema" data-cena="${tema}"><span class="vazio-arte" aria-hidden="true">${c.arte}</span><b>${c.titulo}</b><span>${esc(txt)}</span></div>`;
+};
+// ---------------------------------------------------------------------
+// TELAS DE ERRO COM CARA DE CINEMA (animadas, sem emoji)
+//   rede     -> "A pipoca acabou!" (servidor fora do ar/reiniciando). Tenta de novo sozinho.
+//   servidor -> "A fita enroscou!" (erro 500)
+//   sumiu    -> "Cena cortada" (não existe mais / 404)
+//   aviso    -> mensagem curta com a claquete (ex.: regra do site)
+// ---------------------------------------------------------------------
+function tipoDeErro(e) {
+  const m = String(e?.message || '');
+  if (e instanceof TypeError || /failed to fetch|networkerror|load failed|network request failed/i.test(m)) return 'rede';
+  if (e?.status === 404) return 'sumiu';
+  if ((e?.status || 0) >= 500 || /erro no servidor/i.test(m)) return 'servidor';
+  return 'aviso';
+}
+const _balde = '<svg viewBox="0 0 64 64" fill="currentColor"><path d="M14 22h36l-4.5 36h-27L14 22Zm8.5 4 2 26h3l-1-26h-4Zm11 0-1 26h3l2-26h-4Z"/></svg>';
+function erroBox(e) {
+  const tipo = tipoDeErro(e);
+  const tentar = '<button class="btn btn-primario" type="button" onclick="navegar()">Tentar de novo</button>';
+  const telas = {
+    rede: {
+      arte: `<div class="erro-arte erro-pipoca"><span class="milho"></span><span class="milho"></span><span class="milho"></span><span class="milho"></span><span class="balde">${_balde}</span></div>`,
+      titulo: 'A pipoca acabou!',
+      texto: 'Espere enquanto colocamos mais milho. O servidor está fora do ar ou reiniciando: a página volta sozinha assim que ele responder.',
+      acao: tentar,
+    },
+    servidor: {
+      arte: `<div class="erro-arte erro-fita"><span class="rolo">${_rolo}</span><span class="fio"></span></div>`,
+      titulo: 'A fita enroscou!',
+      texto: 'Algo deu errado do nosso lado. Estamos rebobinando: tente de novo em instantes.',
+      acao: tentar,
+    },
+    sumiu: {
+      arte: `<div class="erro-arte erro-claquete"><span class="claq">${_claq}</span></div>`,
+      titulo: 'Cena cortada',
+      texto: e?.message || 'Isso não existe mais.',
+      acao: '<a class="btn" href="#/inicio">Voltar ao Início</a>',
+    },
+  };
+  const t = telas[tipo];
+  if (!t) return `<div class="vazio erro-aviso"><span class="erro-aviso-ico">${_claq}</span>${esc(e?.message || 'Algo deu errado.')}</div>`;
+  return `<div class="erro-cinema" data-tipo="${tipo}" role="alert">${t.arte}<h2>${t.titulo}</h2><p>${esc(t.texto)}</p>${t.acao}</div>`;
+}
+// "A pipoca acabou": quando o servidor voltar, a página recarrega sozinha
+setInterval(() => {
+  if (!document.querySelector('.erro-cinema[data-tipo="rede"]')) return;
+  fetch('/index.html', { cache: 'no-store' }).then((r) => { if (r.ok && typeof navegar === 'function') navegar(); }).catch(() => {});
+}, 4000);
 
 // Card de review (usado em Reviews, Detalhes e Avaliações)
 function reviewCard(r, { mostrarFilme = true } = {}) {
@@ -92,7 +185,11 @@ function reviewCard(r, { mostrarFilme = true } = {}) {
           <span class="meta">${mostrarFilme ? `<a class="link-perfil" href="#/perfil/${encodeURIComponent(r.autor.username)}">@${esc(r.autor.username)}</a> • ` : ''}${tempoAtras(r.criado_em)}</span>
         </div>
         ${r.texto ? `<p class="${r.tem_spoiler ? 'spoiler' : ''}" title="${r.tem_spoiler ? 'Contém spoiler — toque para ver' : ''}">${esc(r.texto)}</p>` : ''}
-        <button class="curtir ${r.curti ? 'ativo' : ''}" data-curtir="${r.id}" aria-label="Curtir">${icone('joinha')} <span>${r.curtidas}</span></button>
+        <div class="review-acoes">
+          <button class="acao" data-responder-review aria-expanded="false">${icone('reviews')} <span>${r.respostas ?? 0}</span> ${r.respostas === 1 ? 'resposta' : 'respostas'}</button>
+          <button class="curtir ${r.curti ? 'ativo' : ''}" data-curtir="${r.id}" aria-label="Curtir">${icone('joinha')} <span>${r.curtidas}</span></button>
+        </div>
+        <div class="conversa-fio" hidden></div>
       </div>
     </article>`;
 }
@@ -102,6 +199,18 @@ function ligarReviews(raiz) {
   raiz.addEventListener('click', async (e) => {
     const sp = e.target.closest('.spoiler');
     if (sp) { sp.classList.remove('spoiler'); return; }
+    // Responder a review (abre o fio, igual às Conversas)
+    const resp = e.target.closest('[data-responder-review]');
+    if (resp && typeof alternarFio === 'function') {
+      const card = resp.closest('[data-review]'), id = card.dataset.review;
+      alternarFio($('.conversa-fio', card), resp, {
+        listar: () => API.respostasReview(id),
+        responder: (t, f) => API.responderReview(id, t, f),
+        contador: $('span', resp),
+        vazioTxt: 'Ninguém respondeu ainda. Comente o que achou!',
+      });
+      return;
+    }
     const b = e.target.closest('[data-curtir]');
     if (!b) return;
     try {
@@ -201,8 +310,8 @@ function filmeCardComNota(f) {
 }
 
 // Carrossel com barra de rolagem visível + setas (no PC)
-function carrosselHtml(itensHtml, vazioTxt = 'Nada por aqui ainda.') {
-  if (!itensHtml) return vazio(vazioTxt);
+function carrosselHtml(itensHtml, vazioTxt = 'Nada por aqui ainda.', tema) {
+  if (!itensHtml) return vazio(vazioTxt, tema);
   return `
     <div class="carrossel-box">
       <button class="seta-car esq" aria-label="Voltar">${icone('voltar')}</button>
@@ -681,4 +790,88 @@ function escolherSegmento(botao) {
   const seg = botao.closest('.segmentado');
   seg.querySelectorAll('button').forEach((b) => { b.classList.toggle('ativo', b === botao); b.setAttribute('aria-pressed', String(b === botao)); });
   posicionarPilula(seg);
+}
+
+// ---------------------------------------------------------------------
+// Sliders: pinta a parte preenchida até a bolinha (CSS usa a variável --pct)
+// ---------------------------------------------------------------------
+function pintarRange(r) {
+  const min = Number(r.min || 0), max = Number(r.max || 100);
+  r.style.setProperty('--pct', `${((Number(r.value) - min) / Math.max(1, max - min)) * 100}%`);
+}
+document.addEventListener('input', (e) => { if (e.target.matches?.('input[type=range]')) pintarRange(e.target); });
+document.addEventListener('DOMContentLoaded', () => {
+  const pintarTodos = () => document.querySelectorAll('input[type=range]').forEach(pintarRange);
+  pintarTodos();
+  new MutationObserver(pintarTodos).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['value'] });
+});
+
+// ---------------------------------------------------------------------
+// VERIFICADOR DE BANNER: o servidor diz quanto de pele (pessoas) tem em
+// cada faixa da imagem; aqui o banner começa um pouco acima da cabeça de
+// quem aparece. Mesma regra do FocoDoBanner.java (testado com JUnit).
+// A posição é aplicada ANTES de a imagem aparecer: o usuário não vê ajuste.
+// ---------------------------------------------------------------------
+const FOCO_BANNER = new Map();   // url -> Promise<{ proporcao, pele }>
+const FOCO_REGRAS = { limiarTopo: 0.15, minimoNaFaixa: 0.0006, minimoDePele: 0.004, folgaAcima: 0.15, semGente: 20 };
+
+function posicaoDoFoco(pele, fracaoVisivel) {
+  const n = pele.length;
+  if (!n || fracaoVisivel >= 0.999) return 50;
+  const k = Math.max(1, Math.round(fracaoVisivel * n));
+  if (k >= n) return 50;
+  const soma = pele.reduce((a, b) => a + b, 0);
+  const max = Math.max(...pele);
+  if (soma < FOCO_REGRAS.minimoDePele) return FOCO_REGRAS.semGente;
+  let topo = 0;
+  while (topo < n && (pele[topo] < max * FOCO_REGRAS.limiarTopo || pele[topo] < FOCO_REGRAS.minimoNaFaixa)) topo++;
+  if (topo >= n) return FOCO_REGRAS.semGente;
+  const inicio = Math.max(0, Math.min(n - k, topo - Math.round(k * FOCO_REGRAS.folgaAcima)));
+  return Math.round((inicio * 100) / (n - k));
+}
+
+function aplicarFoco(el) {
+  const info = el._foco;
+  if (!info || !el.clientWidth || !el.clientHeight) return;
+  const fracao = (el.clientHeight * info.proporcao) / el.clientWidth;   // quanto da altura da imagem cabe no banner
+  el.style.backgroundPosition = `center ${posicaoDoFoco(info.pele, fracao)}%`;
+}
+
+function focoGuardado(url) {
+  try { const d = JSON.parse(localStorage.getItem('lr_foco:' + url)); return d && d.pele ? d : null; } catch { return null; }
+}
+
+function ajustarBanner(el, url) {
+  if (!el || !url) return;
+  el.dataset.bannerUrl = url;
+  const mostrar = (info) => {
+    if (el.dataset.bannerUrl !== url) return;   // já trocou de imagem (carrossel)
+    if (info) { el._foco = info; aplicarFoco(el); }
+    el.classList.remove('banner-esperando');
+    if (info && !el._observaTamanho && window.ResizeObserver) {
+      el._observaTamanho = new ResizeObserver(() => aplicarFoco(el));
+      el._observaTamanho.observe(el);
+    }
+  };
+  // Já analisada antes (memória ou navegador): aplica na hora, sem esperar nada
+  const pronto = focoGuardado(url);
+  if (pronto) return mostrar(pronto);
+  // Primeira vez: a imagem só aparece quando a posição certa chegar (no máx. 1,5 s)
+  el.classList.add('banner-esperando');
+  if (!FOCO_BANNER.has(url)) {
+    FOCO_BANNER.set(url, API.focoBanner(url).then((d) => {
+      try { localStorage.setItem('lr_foco:' + url, JSON.stringify(d)); } catch { /* sem espaço: tudo bem */ }
+      return d;
+    }).catch(() => null));
+  }
+  const limite = setTimeout(() => mostrar(null), 1500);
+  FOCO_BANNER.get(url).then((info) => { clearTimeout(limite); mostrar(info); });
+}
+
+/** Todos os banners da tela (os que têm imagem de fundo do TMDB). */
+function ajustarBanners(raiz = document) {
+  $$('.banner', raiz).forEach((b) => {
+    const url = (b.style.backgroundImage.match(/url\(["']?(.*?)["']?\)/) || [])[1];
+    if (url && url.includes('image.tmdb.org')) ajustarBanner(b, url);
+  });
 }

@@ -32,7 +32,7 @@ async function api(caminho, { metodo = 'GET', corpo } = {}) {
     Sessao.sair();
     location.hash = '#/login';
   }
-  if (!resp.ok) throw new Error(dados?.erro || 'Algo deu errado. Tente de novo.');
+  if (!resp.ok) throw Object.assign(new Error(dados?.erro || 'Algo deu errado. Tente de novo.'), { status: resp.status });
   return dados;
 }
 
@@ -65,6 +65,15 @@ const API = {
   meuResumo: () => api('/reviews/minhas/resumo'),
   publicarReview: (d) => api('/reviews', { metodo: 'POST', corpo: d }),
   curtir: (id) => api(`/reviews/${id}/curtir`, { metodo: 'POST' }),
+  respostasReview: (id) => api(`/reviews/${id}/respostas`),
+  responderReview: (id, texto, tmdb_id) => api(`/reviews/${id}/respostas`, { metodo: 'POST', corpo: { texto, tmdb_id } }),
+  // conversas (posts estilo Twitter: "me indiquem um filme...")
+  conversas: (filtro = 'todas') => api(`/conversas?filtro=${filtro}`),
+  postarConversa: (texto, tmdb_id) => api('/conversas', { metodo: 'POST', corpo: { texto, tmdb_id } }),
+  respostas: (id) => api(`/conversas/${id}/respostas`),
+  responder: (id, texto, tmdb_id) => api(`/conversas/${id}/respostas`, { metodo: 'POST', corpo: { texto, tmdb_id } }),
+  curtirConversa: (id) => api(`/conversas/${id}/curtir`, { metodo: 'POST' }),
+  apagarConversa: (id) => api(`/conversas/${id}`, { metodo: 'DELETE' }),
   // listas
   listas: (aba = 'todas') => api(`/listas?aba=${aba}`),
   lista: (id) => api(`/listas/${id}`),
@@ -110,6 +119,8 @@ const API = {
   testarLampada: () => api('/casa/lampada/testar', { metodo: 'POST' }),
   // Modo Cinema (cores do pôster)
   paleta: (id) => api(`/filmes/${id}/paleta`),
+  sugestoes: (q) => api(`/filmes/sugestoes?q=${encodeURIComponent(q)}`),
+  focoBanner: (url) => api(`/filmes/foco?url=${encodeURIComponent(url)}`),
   cinema: () => api('/casa/cinema'),
   cinemaIniciar: (d) => api('/casa/cinema', { metodo: 'POST', corpo: d }),
   cinemaFoco: (tmdb_id) => api('/casa/cinema/foco', { metodo: 'POST', corpo: { tmdb_id } }),
@@ -121,7 +132,7 @@ const API = {
   sairFila: (id) => api(`/casa/fila/${id}`, { metodo: 'DELETE' }),
   subirFila: (id) => api(`/casa/fila/${id}/subir`, { metodo: 'POST' }),
   assistirProximo: () => api('/casa/fila/proximo', { metodo: 'POST' }),
-  corLampada: (hex, brilho) => api('/casa/lampada/cor', { metodo: 'POST', corpo: { hex, brilho } }),
+  corLampada: (hex, brilho, nome) => api('/casa/lampada/cor', { metodo: 'POST', corpo: { hex, brilho, nome } }),
   // TV e Som: Bluetooth do computador onde o servidor roda
   bluetooth: () => api('/casa/som/bluetooth'),
   procurarBluetooth: () => api('/casa/som/bluetooth/procurar'),
@@ -130,4 +141,22 @@ const API = {
   desconectarBluetooth: (mac) => api('/casa/som/bluetooth/desconectar', { metodo: 'POST', corpo: { mac } }),
   tocarCelular: (id) => api('/casa/som/celular/tocar', { metodo: 'POST', corpo: { id } }),
   pararCelular: (id) => api('/casa/som/celular/parar', { metodo: 'POST', corpo: { id } }),
+  // Sala ao vivo: linha do tempo da casa + atmosferas dos gêneros
+  eventosCasa: (limite = 15) => api(`/casa/eventos?limite=${limite}`),
+  atmosferas: () => api('/casa/atmosferas'),
+  // [+] Cortina e ar de verdade (Tuya)
+  configurarAparelho: (id, device_id) => api(`/casa/dispositivos/${id}/aparelho`, { metodo: 'PUT', corpo: { device_id } }),
+  testarAparelho: (id) => api(`/casa/dispositivos/${id}/testar`, { metodo: 'POST' }),
+  // [+] Intervalo de verdade + atmosfera na mão
+  cinemaPausar: () => api('/casa/cinema/pausar', { metodo: 'POST' }),
+  cinemaRetomar: () => api('/casa/cinema/retomar', { metodo: 'POST' }),
+  atmosferaManual: (chave) => api('/casa/atmosfera', { metodo: 'POST', corpo: { chave } }),
+  // [+] Celular como controle (QR) e sessão compartilhada (votação)
+  conviteControle: () => api('/casa/controle/convite'),
+  criarVotacao: (filmes) => api('/casa/votacao', { metodo: 'POST', corpo: { filmes } }),
+  minhaVotacao: () => api('/casa/votacao'),
+  encerrarVotacao: () => api('/casa/votacao/encerrar', { metodo: 'POST' }),
+  cancelarVotacao: () => api('/casa/votacao', { metodo: 'DELETE' }),
+  votacao: (codigo, votante) => api(`/votacao/${encodeURIComponent(codigo)}?votante=${encodeURIComponent(votante || '')}`),
+  votar: (codigo, votante, tmdb_id) => api(`/votacao/${encodeURIComponent(codigo)}/votar`, { metodo: 'POST', corpo: { votante, tmdb_id } }),
 };

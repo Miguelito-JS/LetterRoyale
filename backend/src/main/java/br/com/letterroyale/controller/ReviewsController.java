@@ -7,6 +7,7 @@ import br.com.letterroyale.seguranca.UsuarioLogado;
 import br.com.letterroyale.tmdb.TmdbService;
 import br.com.letterroyale.util.Db;
 import br.com.letterroyale.util.Json;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -34,17 +35,72 @@ public class ReviewsController {
                    u.id AS autor_id, u.nome AS autor_nome, u.username AS autor_username,
                    c.titulo, c.ano, c.poster_path, c.backdrop_path, c.nota_tmdb,
                    (SELECT COUNT(*) FROM review_curtidas rc WHERE rc.review_id = r.id) AS curtidas,
-                   (SELECT COUNT(*) FROM review_curtidas rc WHERE rc.review_id = r.id AND rc.usuario_id = ?) AS curti
+                   (SELECT COUNT(*) FROM review_curtidas rc WHERE rc.review_id = r.id AND rc.usuario_id = ?) AS curti,
+                   (SELECT COUNT(*) FROM review_respostas rr WHERE rr.review_id = r.id) AS respostas
               FROM reviews r
               JOIN usuarios u ON u.id = r.usuario_id
               LEFT JOIN filmes_cache c ON c.tmdb_id = r.tmdb_id
             """;
 
+    /** Respostas nas reviews (igual às Conversas). A tabela se cria sozinha; também está no database/schema.sql. */
+    @PostConstruct
+    void criarTabelaRespostas() {
+        db.executar("""
+                CREATE TABLE IF NOT EXISTS review_respostas (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    review_id INT NOT NULL,
+                    usuario_id INT NOT NULL,
+                    texto VARCHAR(500) NOT NULL,
+                    tmdb_id INT NULL,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_review_respostas (review_id),
+                    FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+                )""");
+    }
+
+    /** GET /api/reviews/{id}/respostas */
+    @GetMapping("/{id}/respostas")
+    public List<Map<String, Object>> respostas(@PathVariable long id) {
+        return db.lista("""
+                SELECT r.id, r.texto, r.tmdb_id, r.criado_em,
+                       u.id AS autor_id, u.nome AS autor_nome, u.username AS autor_username, u.avatar_url, u.avatar_cor,
+                       c.titulo, c.ano, c.poster_path, c.backdrop_path, c.nota_tmdb
+                  FROM review_respostas r
+                  JOIN usuarios u ON u.id = r.usuario_id
+                  LEFT JOIN filmes_cache c ON c.tmdb_id = r.tmdb_id
+                 WHERE r.review_id = ? ORDER BY r.criado_em ASC LIMIT 100
+                """, id).stream().map(l -> Json.obj("id", l.get("id"), "texto", l.get("texto"), "criado_em", l.get("criado_em"),
+                "autor", Json.obj("id", l.get("autor_id"), "nome", l.get("autor_nome"), "username", l.get("autor_username"),
+                        "avatar_url", l.get("avatar_url"), "avatar_cor", l.get("avatar_cor")),
+                "filme", l.get("tmdb_id") == null ? null : TmdbService.doCache(l))).toList();
+    }
+
+    /** POST /api/reviews/{id}/respostas {texto, tmdb_id?} -> avisa o autor da review */
+    @PostMapping("/{id}/respostas")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, Object> responder(@PathVariable long id, @RequestBody Map<String, Object> corpo, HttpServletRequest req) {
+        UsuarioLogado u = Auth.exigir(req);
+        Map<String, Object> rev = db.um("SELECT usuario_id, tmdb_id FROM reviews WHERE id = ?", id)
+                .orElseThrow(() -> new ApiException(404, "Essa review foi apagada."));
+        String texto = Json.texto(corpo, "texto", "").trim();
+        if (texto.isEmpty()) throw new ApiException(400, "Escreva alguma coisa.");
+        if (texto.length() > 500) throw new ApiException(400, "No máximo 500 caracteres.");
+        Long filme = Json.numero(corpo, "tmdb_id");
+        if (filme != null && filme != 0) tmdb.garantirNoCache(filme); else filme = null;
+        db.inserir("INSERT INTO review_respostas (review_id, usuario_id, texto, tmdb_id) VALUES (?, ?, ?, ?)", id, u.id(), texto, filme);
+        long autor = ((Number) rev.get("usuario_id")).longValue();
+        long tmdbDaReview = ((Number) rev.get("tmdb_id")).longValue();
+        notificacoes.criar(autor, "conversa", "@" + u.username() + " respondeu sua review: " + texto,
+                "#/filme/" + tmdbDaReview + "/avaliacoes", u.id(), tmdbDaReview, null);
+        return Json.obj("ok", true, "respostas", db.numero("SELECT COUNT(*) FROM review_respostas WHERE review_id = ?", id));
+    }
+
     private Map<String, Object> formatar(Map<String, Object> l) {
         return Json.obj(
                 "id", l.get("id"), "nota", l.get("nota"), "texto", l.get("texto"),
                 "tem_spoiler", Json.verdade(l.get("tem_spoiler")), "criado_em", l.get("criado_em"),
-                "curtidas", l.get("curtidas"), "curti", Json.verdade(l.get("curti")),
+                "curtidas", l.get("curtidas"), "curti", Json.verdade(l.get("curti")), "respostas", l.get("respostas"),
                 "autor", Json.obj("id", l.get("autor_id"), "nome", l.get("autor_nome"), "username", l.get("autor_username")),
                 "filme", TmdbService.doCache(l));
     }

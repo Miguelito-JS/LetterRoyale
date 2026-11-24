@@ -1,5 +1,7 @@
 package br.com.letterroyale.controller;
 
+import br.com.letterroyale.casa.eventos.EventoCasa;
+
 import br.com.letterroyale.casa.BluetoothService;
 import br.com.letterroyale.casa.CasaService;
 import br.com.letterroyale.casa.CinemaService;
@@ -302,7 +304,10 @@ public class CasaController {
         long uid = Auth.exigir(req).id();
         Long brilho = Json.numero(corpo, "brilho");
         try {
+            cinema.parar(uid);   // pediu uma cor: o Modo Cinema não pode trocar ela logo depois
             tuya.cor(casa.lampadaDo(uid), Json.texto(corpo, "hex", "#ffffff"), brilho == null ? 70 : brilho.intValue());
+            String nome = Json.texto(corpo, "nome", null);
+            casa.publicar(uid, EventoCasa.Tipo.LUZ, nome == null ? "Luz colorida" : "Luz " + nome);
             return ok(null);
         } catch (TuyaService.LampadaException e) {
             throw new ApiException(502, e.getMessage());

@@ -5,8 +5,17 @@ let cacheGeneros = null;
 let cacheGenerosSerie = null;
 let cacheStreamings = null;
 
+/** Nome que o site mostra pra cada gênero do TMDB (o mesmo das fileiras do Início). */
+const NOMES_GENERO = {
+  28: 'Ação', 12: 'Aventura', 16: 'Animação', 35: 'Comédia', 80: 'Crime', 99: 'Documentário', 18: 'Drama',
+  10751: 'Família', 14: 'Fantasia', 36: 'História', 27: 'Terror', 10402: 'Música', 9648: 'Mistério',
+  10749: 'Romance', 878: 'Ficção científica', 10770: 'Filme de TV', 53: 'Suspense', 10752: 'Guerra', 37: 'Faroeste',
+};
+
 Paginas.filmes = {
-  titulo: (rota) => (rota.query.q ? `Busca: ${rota.query.q}` : 'Catálogo'),
+  // Veio do "Ver todos" de uma categoria (?genero=53): o título já diz qual é ("Catálogo: Suspense")
+  titulo: (rota) => (rota.query.q ? `Busca: ${rota.query.q}`
+    : rota.query.genero && NOMES_GENERO[rota.query.genero] ? `Catálogo: ${NOMES_GENERO[rota.query.genero]}` : 'Catálogo'),
   async render(raiz, rota) {
     const f = { pagina: 1, ordem: 'popularity.desc', ...rota.query };   // filtros vêm da URL
     // tipo: todos (padrão) | filme | serie | doc. Link antigo com gênero/classificação = filmes.
@@ -16,7 +25,8 @@ Paginas.filmes = {
 
     if (!cacheGeneros) cacheGeneros = await API.generos().catch(() => []);
     if (serie && !cacheGenerosSerie) cacheGenerosSerie = await API.generos('serie').catch(() => []);
-    const generos = serie ? cacheGenerosSerie : cacheGeneros;
+    // O TMDB chama Suspense de "Thriller": aqui fica com o nome que o site usa nas categorias
+    const generos = (serie ? cacheGenerosSerie : cacheGeneros).map((g) => ({ ...g, name: NOMES_GENERO[g.id] || g.name }));
     if (!cacheStreamings) cacheStreamings = await API.streamings().catch(() => []);
 
     const anoAtual = new Date().getFullYear();

@@ -30,6 +30,10 @@ Paginas.inicio = {
       recomendados = await API.recomendados(perfil.favoritos[0].id).catch(() => recomendados);
     }
     const cenaAtiva = casa?.cenas.find((c) => c.ativa);
+    // Últimos assistidos: filmes e séries marcados como "Assistido", do mais recente pro mais antigo
+    const ultimos = [...(perfil?.prateleiras?.assistido?.filmes || []), ...(perfil?.prateleiras_series?.assistido?.filmes || [])]
+      .sort((a, b) => String(b.assistido_em || '').localeCompare(String(a.assistido_em || '')))
+      .slice(0, 16);
 
     raiz.innerHTML = `
       <div class="colunas">
@@ -48,32 +52,40 @@ Paginas.inicio = {
             <div class="bolinhas" role="tablist">${destaques.map((_, i) => `<button role="tab" aria-label="Destaque ${i + 1}" data-i="${i}"></button>`).join('')}</div>
           </section>` : ''}
 
-          <section class="secao">
-            <div class="secao-topo"><h2>Recomendados para você</h2><a class="link" href="#/filmes">Ver todos</a></div>
-            ${carrosselHtml(recomendados.map(filmeCard).join(''), 'Sem recomendações por enquanto.')}
-          </section>
-
-          <section class="secao">
-            <div class="secao-topo"><h2>Em alta esta semana</h2><a class="link" href="#/filmes">Ver todos</a></div>
-            ${carrosselHtml(emAlta.map(filmeCard).join(''), 'Nada em alta agora.')}
-          </section>
-
           ${continuar.length ? `
           <section class="secao">
             <div class="secao-topo"><h2>Continue assistindo</h2></div>
-            ${continuar.map((f) => `
-              <a class="card" href="#/filme/${f.id}" style="display:flex;gap:18px;align-items:center;padding:12px">
+            ${continuar.slice(0, 3).map((f, i) => `
+              <a class="card" href="#/filme/${f.id}" style="display:flex;gap:18px;align-items:center;padding:12px;margin-bottom:10px">
                 <div style="width:110px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;flex-shrink:0;background:var(--surface-raised)">
                   ${f.backdrop ? `<img src="${esc(f.backdrop)}" alt="" style="width:100%;height:100%;object-fit:cover">` : ''}
                 </div>
                 <div style="flex:1;min-width:0">
-                  <b>${esc(f.titulo)}</b>
+                  <span class="tag">${i === 0 ? 'Último assistido' : 'Assistindo'}</span>
+                  <b style="display:block">${esc(f.titulo)}</b>
                   <div class="meta">${f.duracao_min ? `Faltam ${Math.max(0, f.duracao_min - f.progresso_min)} min` : `${f.progresso_min} min assistidos`}</div>
                   <div class="progresso"><i style="width:${f.duracao_min ? Math.min(100, (f.progresso_min / f.duracao_min) * 100) : 30}%"></i></div>
                 </div>
                 <span class="icon-btn" style="background:var(--gold);color:var(--bg-page);border-radius:50%">${icone('play')}</span>
               </a>`).join('')}
           </section>` : ''}
+
+          ${ultimos.length ? `
+          <section class="secao">
+            <div class="secao-topo"><h2>Últimos assistidos</h2><a class="link" href="#/meus-filmes/assistido">Ver todos</a></div>
+            ${carrosselHtml(ultimos.map(filmeCard).join(''), 'Nada assistido ainda.')}
+          </section>` : ''}
+
+          <section class="secao">
+            <div class="secao-topo"><h2>Recomendados para você</h2><a class="link" href="#/secao/recomendados">Ver todos</a></div>
+            ${carrosselHtml(recomendados.map(filmeCard).join(''), 'Sem recomendações por enquanto.')}
+          </section>
+
+          <section class="secao">
+            <div class="secao-topo"><h2>Em alta esta semana</h2><a class="link" href="#/secao/em-alta">Ver todos</a></div>
+            ${carrosselHtml(emAlta.map(filmeCard).join(''), 'Nada em alta agora.')}
+          </section>
+
 
           ${FILEIRAS_INICIO.map((f) => `
           <section class="secao fileira" data-fileira="${f.chave}">
@@ -113,6 +125,7 @@ Paginas.inicio = {
         i = (n + destaques.length) % destaques.length;
         const f = destaques[i];
         $('#destaque').style.backgroundImage = `url('${f.backdrop}')`;
+        ajustarBanner($('#destaque'), f.backdrop);   // verificador: acha onde estão os personagens
         $('#d-titulo').textContent = f.titulo;
         $('#d-linha').innerHTML = `${f.ano || ''} ${f.nota ? `• <span class="estrela">★</span> ${f.nota}` : ''}`;
         $('#d-ver').href = `#/filme/${f.id}`;
@@ -176,13 +189,26 @@ function carregarFileiras(raiz) {
 
 // Página "Ver todos" das fileiras que não têm filtro no Catálogo (#/secao/lancamentos, #/secao/em-breve...)
 Paginas.secao = {
-  titulo: (rota) => (FILEIRAS_INICIO.find((x) => x.chave === rota.partes[0]) || {}).titulo || 'Filmes',
+  titulo: (rota) => ({ 'em-alta': 'Em alta esta semana', recomendados: 'Recomendados para você' }[rota.partes[0]]
+    || (FILEIRAS_INICIO.find((x) => x.chave === rota.partes[0]) || {}).titulo || 'Filmes'),
   async render(raiz, rota) {
     const chave = rota.partes[0];
-    const filmes = chave === 'comentando' ? await API.maisComentados() : await API.secao(chave);
+    const filmes = await carregarSecaoInicio(chave);
     raiz.innerHTML = filmes.length
       ? `<div class="grade grade-catalogo">${filmes.map(filmeCard).join('')}</div>`
       : vazio('Nada por aqui agora.');
     if (typeof ligarColunasCheias === 'function') ligarColunasCheias($('.grade-catalogo', raiz));
   },
 };
+
+/** Filmes de uma fileira do Início (o "Ver todos" mostra exatamente aquela categoria). */
+async function carregarSecaoInicio(chave) {
+  if (chave === 'comentando') return API.maisComentados();
+  if (chave === 'em-alta') return API.emAlta();
+  if (chave === 'recomendados') {
+    const perfil = await API.perfil().catch(() => null);
+    const fav = perfil?.favoritos?.[0];
+    return fav ? API.recomendados(fav.id).catch(() => API.emAlta()) : (await API.emAlta()).slice(5);
+  }
+  return API.secao(chave);
+}
