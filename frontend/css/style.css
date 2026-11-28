@@ -1130,7 +1130,8 @@ body { font-weight: 600; }
 /* =====================================================================
    [+] SALA AO VIVO (gêmeo digital) + comando de voz — ver js/paginas/sala.js
    ===================================================================== */
-.sala-grade { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 16px; }
+/* Desenho da sala na largura toda; a linha do tempo fica embaixo dele (a atmosfera mora na lateral, acima da fila) */
+.sala-grade { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .sala-palco { align-self: start; background: var(--surface-card); border-radius: var(--radius-lg); overflow: hidden; }
 .sala-palco svg { display: block; width: 100%; height: auto; }
 .sala-anima { transition: width .9s ease, x .9s ease; }
@@ -1142,6 +1143,8 @@ body { font-weight: 600; }
 .sala-lado { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .sala-atmosfera { display: flex; flex-direction: column; gap: 6px; background: var(--surface-panel); border-radius: var(--radius); padding: 14px; }
 .sala-atmosfera > b { font-size: 18px; }
+.sala-atmosfera-lateral { background: none; padding: 0; }
+.sala-atmosfera-lateral .badge { align-self: flex-start; }
 .sala-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .sala-chips .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--surface-raised); }
 .sala-sub { font-size: 15px; color: var(--text-muted); font-weight: 600; }
@@ -1249,7 +1252,18 @@ body { font-weight: 600; }
 .votacao-topo .ico svg { width: 30px; height: 30px; }
 .votacao-busca { margin: 18px 0 4px; max-width: none; }
 .votacao-escolha { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
-@media (min-width: 901px) { .colunas.pagina-votacao-grade { grid-template-columns: minmax(0, 1fr) 300px; } }
+@media (min-width: 901px) {
+  .colunas.pagina-votacao-grade { grid-template-columns: minmax(0, 1fr) 300px; row-gap: 0; }
+  /* Topo, busca e rótulo ficam ao lado do quadro "Na votação"; a grade de pôsteres desce pra largura toda */
+  .pagina-votacao-grade > div:first-child { display: contents; }
+  .pagina-votacao-grade .votacao-topo { grid-column: 1; grid-row: 1; }
+  .pagina-votacao-grade .votacao-busca { grid-column: 1; grid-row: 2; }
+  .pagina-votacao-grade .votacao-rotulo { grid-column: 1; grid-row: 3; }
+  .pagina-votacao-grade > .lateral { grid-column: 2; grid-row: 1 / span 3; }
+  .pagina-votacao-grade #vt-grade { grid-column: 1 / -1; grid-row: 4; margin-top: 8px; }
+  /* a lista rola dentro do quadro, assim ele não empurra a grade pra baixo */
+  .pagina-votacao-grade #vt-lista { max-height: 128px; overflow-y: auto; padding-right: 4px; }
+}
 /* Votação no celular: uma coluna só, o quadro "Na votação" vem primeiro e nada fica por cima */
 @media (max-width: 900px) {
   .colunas.pagina-votacao-grade { grid-template-columns: minmax(0, 1fr); }

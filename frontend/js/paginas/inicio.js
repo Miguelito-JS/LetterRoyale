@@ -113,9 +113,11 @@ Paginas.inicio = {
               </div>`).join('') : vazio('Siga pessoas nas reviews (toque no @) para ver o que elas assistem.')}
           </section>
         </aside>
-      </div>`;
+      </div>
+      <div class="inicio-largo"></div>`;
 
     ligarCarrosseis(raiz);
+    ligarLarguraTotal(raiz);
     carregarFileiras(raiz);
 
     // Carrossel do destaque: troca a cada 7s, ou ao tocar nas bolinhas
@@ -165,6 +167,38 @@ const FILEIRAS_INICIO = [
   { chave: 'suspense', titulo: 'Suspense', link: '#/filmes?tipo=filme&genero=53' },
   { chave: 'documentarios', titulo: 'Documentários', link: '#/filmes?tipo=doc' },
 ];
+
+// As seções que ficam abaixo da coluna da direita (Minha casa / Amigos assistiram) passam a ocupar
+// a largura toda da tela, em vez de deixar um vazio à direita.
+function ligarLarguraTotal(raiz) {
+  const colunas = $('.colunas', raiz);
+  const esquerda = colunas?.firstElementChild;
+  const lateral = $('.lateral', raiz);
+  const largo = $('.inicio-largo', raiz);
+  if (!esquerda || !lateral || !largo) return;
+
+  let duasColunas = null;
+  const ajustar = () => {
+    const agora = getComputedStyle(colunas).gridTemplateColumns.trim().split(/\s+/).length > 1;
+    if (agora === duasColunas) return;   // só refaz quando o layout muda (evita resetar a rolagem dos carrosséis)
+    duasColunas = agora;
+    [...largo.children].forEach((s) => esquerda.appendChild(s));   // volta tudo pra esquerda
+    if (!agora) return;                                             // no celular é uma coluna só
+    const fimLateral = lateral.getBoundingClientRect().bottom;
+    const secoes = [...esquerda.children];
+    const i = secoes.findIndex((s) => s.getBoundingClientRect().top >= fimLateral);
+    if (i >= 0) secoes.slice(i).forEach((s) => largo.appendChild(s));
+  };
+  ajustar();
+
+  let t;
+  const aoRedimensionar = () => {
+    if (!document.body.contains(raiz) || !raiz.contains(colunas)) return window.removeEventListener('resize', aoRedimensionar);
+    clearTimeout(t);
+    t = setTimeout(ajustar, 150);
+  };
+  window.addEventListener('resize', aoRedimensionar);
+}
 
 function carregarFileiras(raiz) {
   const carregar = async (sec) => {

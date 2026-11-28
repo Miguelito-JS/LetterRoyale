@@ -91,6 +91,10 @@ Paginas.casa = {
               </button>`).join('')}
           </section>
           <section class="card">
+            <!-- preenchido pela Sala ao vivo (sala.js) -->
+            <div id="sala-atmosfera" class="sala-atmosfera sala-atmosfera-lateral" aria-live="polite"></div>
+          </section>
+          <section class="card">
             <div class="secao-topo" style="margin-bottom:12px"><h2 style="font-size:22px">Fila do cinema</h2><span class="meta">${(c.fila || []).length} na fila</span></div>
             ${(c.fila || []).length ? `
               <ol class="fila-cinema">

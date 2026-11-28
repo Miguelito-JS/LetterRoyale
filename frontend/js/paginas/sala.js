@@ -80,7 +80,6 @@ const SalaAoVivo = {
             </svg>
           </div>
           <div class="sala-lado">
-            <div id="sala-atmosfera" class="sala-atmosfera" aria-live="polite"></div>
             <div class="sala-linha-topo">
               <h3 class="sala-sub">Linha do tempo da casa</h3>
               <button type="button" class="sala-ver-mais" id="sala-ver-mais" aria-expanded="false" aria-controls="sala-eventos" hidden>Ver tudo</button>
